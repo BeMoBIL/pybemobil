@@ -1,8 +1,13 @@
 name: Release
 
+# Publishing a GitHub release uploads to PyPI.
+# Running this workflow by hand (Actions tab -> Release -> Run workflow)
+# uploads a dev build of the selected branch to TestPyPI instead, as a dry run.
+
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,13 +23,31 @@ jobs:
         run: |
           pip install build twine
           python -m build
-          twine check dist/*
+          twine check --strict dist/*
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  publish:
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write  # for TestPyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
     environment: pypi

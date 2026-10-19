@@ -95,6 +95,22 @@ Quick start
 
 ----
 
+Citing
+------
+
+If you use pybemobil in your work, please cite it. The "Cite this
+repository" button on the `GitHub page <https://github.com/BeMoBIL/pybemobil>`_
+(generated from ``CITATION.cff``) gives the reference in APA and BibTeX
+format.
+
+pybemobil is a Python implementation of the BeMoBIL pipeline, so please
+consider also citing:
+
+   Klug, M., Jeung, S., Wunderlich, A., Gehrke, L., Protzak, J., Djebbara, Z.,
+   Argubi-Wollesen, A., Wollesen, B., & Gramann, K. (2022). The BeMoBIL
+   Pipeline for automated analyses of multimodal mobile brain and body imaging
+   data. *bioRxiv*. https://doi.org/10.1101/2022.09.29.510051
+
 .. toctree::
    :maxdepth: 1
    :caption: API Reference
@@ -108,3 +124,9 @@ Quick start
    :caption: Guides
 
    guides/bemobil
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Project
+
+   whats_new

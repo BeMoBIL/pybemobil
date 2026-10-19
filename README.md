@@ -93,95 +93,18 @@ See `examples/` for complete worked examples:
 | Rigid body kinematics | `examples/motion_processing.py` |
 | BIDS export | `examples/bids_export_example.py` |
 
+## Citing
+
+If you use pybemobil in your work, please cite it. The "Cite this repository" button on GitHub (generated from [`CITATION.cff`](https://github.com/BeMoBIL/pybemobil/blob/main/CITATION.cff)) gives the reference in APA and BibTeX format.
+
+pybemobil is a Python implementation of the BeMoBIL pipeline, so please consider also citing:
+
+> Klug, M., Jeung, S., Wunderlich, A., Gehrke, L., Protzak, J., Djebbara, Z., Argubi-Wollesen, A., Wollesen, B., & Gramann, K. (2022). The BeMoBIL Pipeline for automated analyses of multimodal mobile brain and body imaging data. *bioRxiv*. https://doi.org/10.1101/2022.09.29.510051
+
+## License
+
+pybemobil is released under the [BSD 3-Clause License](https://github.com/BeMoBIL/pybemobil/blob/main/LICENSE).
+
 ## Contributing
 
-This is a private repository for BPN lab members. Contributions are made via feature branches and pull requests against a personal fork's `upstream` remote (see `.github/CONTRIBUTING.md`).
-
-### Setup
-
-1. Clone the repo:
-
-    ```bash
-    git clone https://github.com/BeMoBIL/pybemobil.git
-    cd pybemobil
-    ```
-
-2. Install in editable mode with the development extras:
-
-    ```bash
-    pip install -e ".[dev]"
-    ```
-
-3. Install pre-commit hooks:
-
-    ```bash
-    pre-commit install
-    ```
-
-### Workflow
-
-1. Create a branch from `main`:
-
-    ```bash
-    git checkout -b your-git-name/short-description
-    ```
-
-2. Make your changes, commit often with clear messages
-3. Push your branch:
-
-    ```bash
-    git push -u origin your-git-name/short-description
-    ```
-
-4. Open a pull request against `main` on GitHub
-5. Request a review from a lab member before merging
-
-### Branch Naming
-
-| Type | Pattern | Example |
-| ------ | --------- | --------- |
-| Feature | `name/feature-desc` | `robin/add-ica-pipeline` |
-| Fix | `name/fix-desc` | `alex/fix-montage-rotation` |
-| Experiment | `name/exp-desc` | `maria/exp-zapline-threshold` |
-
-### Testing
-
-Tests live in `tests/`. Run the full suite from the repo root:
-
-```bash
-pip install -e ".[test]"   # first time only
-pytest                     # fast tests only (default)
-pytest --runslow           # include slow integration tests
-```
-
-Coverage runs automatically and produces an HTML report in `htmlcov/`. Open `htmlcov/index.html` in a browser after the run.
-
-**Test structure:**
-
-`tests/conftest.py` defines shared fixtures (synthetic `tiny_raw`, `motion_raw`, and the EEGBCI `sample_raw` used by slow tests) and registers two custom markers.
-
-| Marker                        | Meaning                                                                                          |
-|-------------------------------|--------------------------------------------------------------------------------------------------|
-| `@pytest.mark.slowtest`       | Integration test that downloads data or fits models. Skipped by default; run with `--runslow`.   |
-| `@pytest.mark.requires_data`  | Test that depends on external data files. Skipped when paths are absent.                         |
-
-Each test module maps to one source module:
-
-| Test file | Source module |
-| ----------- | -------------- |
-| `test_utils.py` | `preproc/utils.py` |
-| `test_motion.py` | `preproc/motion.py` |
-| `test_preprocessing.py` | `preproc/preprocessing.py` |
-| `test_xdf_helpers.py` | `io/xdf.py` (private helpers) |
-| `test_bids_export.py` | `io/bids_export.py` |
-
-**Integration testing convention:**
-
-Every significant change to a public function must be accompanied by at least one test. Fast unit tests (synthetic data, no I/O) are the default. Integration tests that touch real files or run the full pipeline are marked `@pytest.mark.slowtest` and kept in the same test module as the unit tests for that module. PRs are expected to pass `pytest` (without `--runslow`) in CI.
-
-### Guidelines
-
-- Keep PRs focused - one logical change per PR
-- Pre-commit hooks run automatically on commit (formatting, linting)
-- Do not push directly to `main`, always use branches and keep main clean (mirror of upstream)
-- Include a short description in your PR of what changed and why
+Contributions are welcome! To report a bug or suggest a feature, please [open an issue](https://github.com/BeMoBIL/pybemobil/issues). For development setup, the pull request workflow, testing and releases, see [CONTRIBUTING.md](https://github.com/BeMoBIL/pybemobil/blob/main/.github/CONTRIBUTING.md).

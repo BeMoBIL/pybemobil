@@ -4,11 +4,11 @@ repos:
     hooks:
       - id: ruff
         name: ruff check --fix
-        files: ^(pybemobil/|MNE-denoise/|examples/|tests/)
+        files: ^(pybemobil/|tests/)
         args: ["--fix"]
       - id: ruff-format
         name: ruff format
-        files: ^(pybemobil/|MNE-denoise/|examples/|tests/)
+        files: ^(pybemobil/|tests/)
 
 
   - repo: https://github.com/pre-commit/pre-commit-hooks

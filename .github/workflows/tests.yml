@@ -63,6 +63,27 @@ jobs:
             junit-results.xml
             htmlcov/
 
+  minimum-versions:
+    # Oldest supported Python with the lowest dependency versions allowed in
+    # pyproject.toml; keep these pins in sync with the lower bounds there
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package with minimum dependency versions
+        run: |
+          pip install -e ".[test]" "mne==1.13.0" "mne-bids==0.18.0" "pyprep==0.8.0" "mne-icalabel==0.8.0" "jamica[jax]==0.3.0"
+
+      - name: Run test suite
+        run: |
+          pytest
+
   slow:
     # End-to-end pipeline runs on PhysioNet data; only on pushes to main,
     # not on every pull request update
