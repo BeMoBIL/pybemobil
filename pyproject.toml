@@ -1,10 +1,11 @@
 [build-system]
 build-backend = "hatchling.build"
-requires = ["hatch-vcs", "hatchling"]
+requires = ["hatch-vcs", "hatchling>=1.27"]
 
 [project]
-authors = [{name = "The PyBeMoBIL team"}]
+authors = [{email = "eric.wieske@gmail.com", name = "Roy Eric Wieske"}]
 classifiers = [
+  "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "Operating System :: MacOS",
   "Operating System :: Microsoft :: Windows",
@@ -14,24 +15,23 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python",
   "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
   "Topic :: Software Development",
 ]
 dependencies = [
   "matplotlib",
   "meegkit",
-  "mne",
-  "mne_bids",
+  "mne-bids>=0.18",
   "mne-denoise",
   "mne-faster",
-  "mne-icalabel",
+  "mne-icalabel>=0.8",
+  "mne>=1.13",
   "nibabel",
   "numpy",
   "onnxruntime",
   "pandas",
-  "plotly",
-  "pylsl",
   "pybv",
-  "pyprep",
+  "pyprep>=0.8",
   "python-picard",
   "pyxdf",
   "scikit-learn",
@@ -44,7 +44,8 @@ keywords = [
   "neuroscience",
   "data analysis",
 ]
-license = {text = "Roy Eric Random. All rights reserved."}
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 maintainers = [
   {email = "eric.wieske@gmail.com", name = "Roy Eric Wieske"},
 ]
@@ -65,7 +66,7 @@ docs = [
 # JAX-accelerated AMICA implementation used by compute_ica(ica_method="jamica")
 # (the default).  Optional: compute_ica falls back to picard with a warning
 # when this is not installed.
-jamica = ["jamica[jax]"]
+jamica = ["jamica[jax]>=0.3"]
 # Dependencies for running the test infrastructure
 test = ["pybemobil[jamica]", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
 
@@ -87,7 +88,9 @@ packages = ["pybemobil"]
 allow-direct-references = true  # allow specifying URLs in our dependencies
 
 [tool.hatch.version]
-raw-options = {version_scheme = "release-branch-semver"}
+# no-local-version: dev builds (e.g. for TestPyPI) get versions like
+# 0.1.dev3 instead of 0.1.dev3+g1234abc, which PyPI would reject
+raw-options = {local_scheme = "no-local-version", version_scheme = "release-branch-semver"}
 source = "vcs"
 
 [tool.pytest.ini_options]
