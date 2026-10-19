@@ -18,3 +18,4 @@ qa_reports/
 .claude
 
 pyrightconfig.json
+doc/source/api/generated/
