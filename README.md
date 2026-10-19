@@ -95,11 +95,11 @@ See `examples/` for complete worked examples:
 
 ## Citing
 
-If you use pybemobil in your work, please cite the BeMoBIL pipeline paper:
+If you use pybemobil in your work, please cite it. The "Cite this repository" button on GitHub (generated from [`CITATION.cff`](https://github.com/BeMoBIL/pybemobil/blob/main/CITATION.cff)) gives the reference in APA and BibTeX format.
+
+pybemobil is a Python implementation of the BeMoBIL pipeline, so please consider also citing:
 
 > Klug, M., Jeung, S., Wunderlich, A., Gehrke, L., Protzak, J., Djebbara, Z., Argubi-Wollesen, A., Wollesen, B., & Gramann, K. (2022). The BeMoBIL Pipeline for automated analyses of multimodal mobile brain and body imaging data. *bioRxiv*. https://doi.org/10.1101/2022.09.29.510051
-
-Citation metadata for pybemobil itself is in [`CITATION.cff`](https://github.com/BeMoBIL/pybemobil/blob/main/CITATION.cff) (GitHub's "Cite this repository" button).
 
 ## License
 

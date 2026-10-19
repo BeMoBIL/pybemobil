@@ -1,7 +1,8 @@
 cff-version: 1.2.0
 message: >-
-  If you use pybemobil, please cite the BeMoBIL pipeline paper below
-  (preferred-citation) and, if possible, the software itself.
+  If you use pybemobil, please cite it using the metadata below. pybemobil is
+  a Python implementation of the BeMoBIL pipeline; please consider also citing
+  the BeMoBIL pipeline paper listed under references.
 title: "pybemobil: MoBI data loading, preprocessing, and visualization built on MNE-Python"
 type: software
 authors:
@@ -9,6 +10,8 @@ authors:
     given-names: Roy Eric
     email: eric.wieske@gmail.com
     affiliation: Technische Universität Berlin
+version: 0.1.0
+date-released: 2026-10-19
 license: BSD-3-Clause
 repository-code: "https://github.com/BeMoBIL/pybemobil"
 url: "https://bemobil.github.io/pybemobil/"
@@ -18,28 +21,28 @@ keywords:
   - MoBI
   - MNE-Python
   - preprocessing
-preferred-citation:
-  type: article
-  title: "The BeMoBIL Pipeline for automated analyses of multimodal mobile brain and body imaging data"
-  authors:
-    - family-names: Klug
-      given-names: Marius
-    - family-names: Jeung
-      given-names: Sein
-    - family-names: Wunderlich
-      given-names: Anna
-    - family-names: Gehrke
-      given-names: Lukas
-    - family-names: Protzak
-      given-names: Janna
-    - family-names: Djebbara
-      given-names: Zakaria
-    - family-names: Argubi-Wollesen
-      given-names: Andreas
-    - family-names: Wollesen
-      given-names: Bettina
-    - family-names: Gramann
-      given-names: Klaus
-  journal: bioRxiv
-  year: 2022
-  doi: 10.1101/2022.09.29.510051
+references:
+  - type: article
+    title: "The BeMoBIL Pipeline for automated analyses of multimodal mobile brain and body imaging data"
+    authors:
+      - family-names: Klug
+        given-names: Marius
+      - family-names: Jeung
+        given-names: Sein
+      - family-names: Wunderlich
+        given-names: Anna
+      - family-names: Gehrke
+        given-names: Lukas
+      - family-names: Protzak
+        given-names: Janna
+      - family-names: Djebbara
+        given-names: Zakaria
+      - family-names: Argubi-Wollesen
+        given-names: Andreas
+      - family-names: Wollesen
+        given-names: Bettina
+      - family-names: Gramann
+        given-names: Klaus
+    journal: bioRxiv
+    year: 2022
+    doi: 10.1101/2022.09.29.510051
