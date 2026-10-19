@@ -101,7 +101,9 @@ Citing
 If you use pybemobil in your work, please cite it. The "Cite this
 repository" button on the `GitHub page <https://github.com/BeMoBIL/pybemobil>`_
 (generated from ``CITATION.cff``) gives the reference in APA and BibTeX
-format.
+format. Every release is archived on Zenodo; to cite pybemobil in general, use
+the DOI `10.5281/zenodo.23480659 <https://doi.org/10.5281/zenodo.23480659>`_, which always resolves to the
+latest version.
 
 pybemobil is a Python implementation of the BeMoBIL pipeline, so please
 consider also citing:

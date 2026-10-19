@@ -41,9 +41,9 @@ Overview
    * - Bad channel detection
      - ``clean_rawdata`` (ASR-based correlation)
      - PyPREP + FASTER + optional line-noise / flatline criteria
-   * - ASR
-     - Not used (AMICA autoreject instead)
-     - Optional (``asr=False`` by default)
+   * - Outlier rejection for ICA
+     - AMICA sample rejection (``AMICA_autoreject=1``)
+     - AMICA sample rejection via ``jamica`` (on by default); ASR optional
    * - BIDS support
      - Manual / separate toolbox
      - Built-in via ``mne-bids``
@@ -52,7 +52,7 @@ Overview
      - JSON descriptor in ``raw.info["description"]``
    * - Output format
      - ``.set`` / ``.fdt`` (EEGLAB)
-     - ``.fif.gz`` (MNE)
+     - FIF (``.fif``, or ``.fif.gz``) as BIDS derivatives
 
 ----
 
@@ -75,6 +75,10 @@ The following preprocessing parameters are set to match the original MATLAB impl
    * - ICA high-pass filter
      - 1.75 Hz
      - ``filter_bands_ica=(1.75, None)``
+   * - AMICA sample rejection
+     - on, 3 SD, 10 rounds (``AMICA_autoreject=1``,
+       ``AMICA_reject_sigma_threshold=3``, ``AMICA_n_rej=10``)
+     - ``jamica_kwargs={"fit_params": {"do_reject": True, "rejsig": 3.0, "numrej": 10}}``
    * - ZapLine mode
      - auto-detect (``noisefreqs=[]``)
      - ``line_noise_method="adaptive"``
@@ -100,34 +104,69 @@ Intentional differences
 ------------------------
 
 **Bad channel detection method**
-   The original MATLAB implementation uses ``clean_rawdata`` (a variant of the ASR correlation algorithm) with
-   ``chancorr_crit=0.8`` and ``chan_max_broken_time=0.3``.  PyBeMoBIL uses a combination
-   of PyPREP and FASTER, which are well-validated standalone Python implementations.
-   Both approaches flag channels that decorrelate from their neighbours; the underlying
-   principle is the same.
+   The original MATLAB implementation detects bad channels with ``clean_rawdata``'s channel
+   criteria on average-referenced data: a channel is flagged if it correlates below
+   ``chancorr_crit=0.8`` with its robust estimate from the other channels for more than
+   ``chan_max_broken_time=0.5`` of the recording (flatline and line-noise criteria are off).
+   Because this estimate is randomized, detection is repeated ``chan_detect_num_iter=20``
+   times and a channel is rejected if it was flagged in at least
+   ``chan_detected_fraction_threshold=0.5`` of the runs. ``num_chan_rej_max_target=1/5``
+   is a soft target: if more than a fifth of the channels pass that threshold, the
+   threshold is raised so that roughly a fifth are rejected (ties can still add more).
+
+   PyBeMoBIL uses PyPREP (NaN/flat, deviation, high-frequency noise, correlation and, when
+   a montage is set, RANSAC) combined with FASTER's channel correlation and variance
+   criteria, plus optional line-noise and flatline criteria (see
+   :func:`~pybemobil.preproc.get_bad_chs`). It runs once and has no iteration or rejection
+   target. Both approaches flag channels that stop correlating with their neighbours, but
+   the exact channels detected can differ.
 
 **ASR**
-   The original MATLAB implementation does not apply ASR - it relies on AMICA's built-in autoreject
-   (``AMICA_autoreject=1``, sigma threshold 3).  PyBeMoBIL also disables ASR by default
-   (``asr=False``) for the same reason: AMICA's internal rejection is sufficient for clean
-   ICA decompositions.  ASR is available as an opt-in (``asr=True`` or ``asr={"cutoff": 20}``)
-   for pipelines that do not use AMICA.
+   The original MATLAB implementation does not apply ASR; it relies on AMICA's built-in
+   sample rejection (``AMICA_autoreject=1``, 3 SD, 10 rejection rounds). PyBeMoBIL does the
+   same: ASR is off by default (``asr=False``), and when ICA runs with ``jamica`` (the
+   default), AMICA's sample rejection is on with the same settings. Pass
+   ``jamica_kwargs={"fit_params": {"do_reject": False}}`` to turn it off. ASR is available
+   as an opt-in (``asr=True`` or ``asr={"cutoff": 20}``), e.g. when ICA falls back to
+   picard, which has no sample rejection.
 
-**Final high-pass filter**
-   The original MATLAB implementation applies a 0.2 Hz high-pass after ICA (``final_filter_lower_edge=0.2``).
-   PyBeMoBIL removed this step (``final_filter_bands`` was dropped) because the
-   main bandpass filter (``filter_bands=(0.1, 100.0)`` by default) already removes
-   sub-0.1 Hz drift, and the final filter adds an implicit dependency on analysis choices
-   that belong downstream.  Add it back explicitly if needed:
+**Filtering**
+   The original MATLAB implementation does not filter the continuous data before ICA. Only
+   the copy used to fit AMICA is high-passed at 1.75 Hz (FIR, order 1650), and after the
+   ICA solution is copied back, a final 0.2 Hz high-pass is applied
+   (``final_filter_lower_edge=0.2``).
+
+   PyBeMoBIL band-passes the continuous data at 0.1-100 Hz after bad channel detection and
+   before ICA (``filter_bands=(0.1, 100.0)``), and this filter stays in the cleaned output.
+   The ICA copy is high-passed at 1.75 Hz as in MATLAB (``filter_bands_ica=(1.75, None)``),
+   but with MNE's default FIR design, whose filter length is chosen automatically rather
+   than fixed at order 1650. There is no final high-pass after ICA. To get closer to the
+   MATLAB behaviour, skip the main bandpass and add the final filter yourself:
 
    .. code-block:: python
 
+      preprocessor = EEGPreprocessor(loader=loader, filter_bands=(None, None))
+      raw_clean, report, metadata = preprocessor.run(fname_in, fname_out=fname_out)
       raw_clean.filter(l_freq=0.2, h_freq=None)
 
 **Output format**
-   The original MATLAB implementation saves ``.set`` / ``.fdt`` (EEGLAB) files.  PyBeMoBIL saves ``.fif.gz``
-   (MNE native), which supports lossless compression and carries full metadata including
-   the provenance descriptor.
+   The original MATLAB implementation saves ``.set`` / ``.fdt`` (EEGLAB) files. PyBeMoBIL
+   saves MNE's FIF format and organizes outputs as BIDS. ``fname_out`` must be a BIDS-style
+   path inside a ``derivatives`` folder (e.g.
+   ``bids/derivatives/pybemobil/sub-01/eeg/sub-01_task-walk_eeg.fif``); its entities name
+   every output. The FIF files use the extension of ``fname_out``: ``.fif`` by default, or
+   ``.fif.gz`` if ``fname_out`` ends in it. Written next to ``fname_out`` (see
+   :func:`~pybemobil.preproc.get_derivative_paths`):
+
+   - ``*_desc-clean_eeg.fif``: the cleaned recording
+   - ``*_desc-preica_eeg.fif``: the data ICA was applied to (for re-applying ICA)
+   - ``*_ica.fif``, ``*_iclabels.json``, ``*_badchannels.json``
+   - ``*_dipoles/`` (one ``.bdip`` file per IC) and ``*_trans.fif``, when fitting dipoles
+   - ``*_report.html``
+
+   By default (``save_bids_raw=True``) the untouched input is also written once to the raw
+   part of the BIDS dataset with :func:`mne_bids.write_raw_bids`. The BIDS root is taken
+   from the folder above ``derivatives`` unless ``bids_root`` is given.
 
 **Bilateral dipole fitting (not yet available)**
    The original MATLAB implementation supports ``number_of_dipoles=2``, fitting a symmetric
@@ -156,17 +195,19 @@ The following script replicates the core BeMoBIL EEG preprocessing steps using P
    loader = XDFLoader(
        montage="easycap-M1",          # channel_locations_filename
        target_sfreq=250.0,            # resample_freq = 250
-       old_reference="FCz",           # ref_channel = 'FCz'
+       old_reference="FCz",           # example; MATLAB's default ref_channel = [] keeps
+                                      # the recording reference as is
    )
 
    preprocessor = EEGPreprocessor(
        loader=loader,
        line_noise_freq="europe",      # 50 Hz; use "usa" for 60 Hz
        line_noise_method="adaptive",  # zaplineConfig.noisefreqs = []
-       filter_bands=(0.1, 100.0),     # broad bandpass (BeMoBIL keeps full band)
+       filter_bands=(0.1, 100.0),     # PyBeMoBIL only; MATLAB does not filter here
        filter_bands_ica=(1.75, None), # filter_lowCutoffFreqAMICA = 1.75
        downsample_ica=250.0,          # resample_freq = 250
-       ica_method="jamica",           # AMICA (via jamica)
+       ica_method="jamica",           # AMICA (via jamica), sample rejection on
+                                      # (AMICA_autoreject = 1, 3 SD, 10 rounds)
        thresh=-1,                     # iclabel_threshold = -1
        # include_labels default = all except eye blink (iclabel_classes = [1 2 4 5 6 7])
        fit_dipoles=True,              # dipole fitting on
@@ -174,16 +215,17 @@ The following script replicates the core BeMoBIL EEG preprocessing steps using P
        remove_outside_head=False,     # do_remove_outside_head = 'off'
    )
 
+   # fname_out is a BIDS-style path inside derivatives/; the BIDS root is "bids"
    raw_clean, report, metadata = preprocessor.run(
        "sub-01_task-walk_run-01.xdf",
-       fname_out="sub-01_preprocessed_and_ICA.fif.gz",
+       fname_out="bids/derivatives/pybemobil/sub-01/eeg/sub-01_task-walk_run-01_eeg.fif",
        overwrite=True,
    )
 
    # Access pipeline outputs
-   ica        = metadata["ica"]
-   ic_labels  = metadata["ic_labels"]
-   dipoles    = metadata["dipoles"]
+   ica         = metadata["ica"]
+   ic_labels   = metadata["ic_labels"]
+   dipoles     = metadata["dipoles"]
    bad_ch_dict = metadata["bad_ch_dict"]
 
 ----

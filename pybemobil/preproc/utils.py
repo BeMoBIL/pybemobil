@@ -460,6 +460,28 @@ def _handle_trans(trans, info=None):
         return trans
 
 
+#: AMICA likelihood-based sample rejection used by default with jamica. Matches
+#: the MATLAB BeMoBIL pipeline defaults (``AMICA_autoreject=1``,
+#: ``AMICA_reject_sigma_threshold=3``, ``AMICA_n_rej=10``).
+DEFAULT_JAMICA_FIT_PARAMS = {"do_reject": True, "rejsig": 3.0, "numrej": 10}
+
+
+def _resolve_jamica_kwargs(jamica_kwargs):
+    """Return *jamica_kwargs* with the default AMICA sample rejection merged in.
+
+    Entries in ``jamica_kwargs["fit_params"]`` override
+    ``pybemobil.preproc.utils.DEFAULT_JAMICA_FIT_PARAMS`` key by key, so
+    ``{"fit_params": {"do_reject": False}}`` turns rejection off while other
+    keys such as ``max_iter`` are passed through unchanged.
+    """
+    kwargs = dict(jamica_kwargs or {})
+    kwargs["fit_params"] = {
+        **DEFAULT_JAMICA_FIT_PARAMS,
+        **(kwargs.get("fit_params") or {}),
+    }
+    return kwargs
+
+
 def compute_ica(
     raw,
     filter_bands_ica=(1.0, 100.0),
@@ -516,8 +538,13 @@ def compute_ica(
     jamica_kwargs : dict | None
         Extra keyword arguments forwarded to :func:`jamica.fit_ica` when
         ``ica_method="jamica"`` (e.g. ``{"max_iter": 2000, "num_mix": 3}``).
-        ``None`` uses jamica's defaults.  Ignored when a non-jamica method is
-        used.
+        AMICA's likelihood-based sample rejection is on by default, matching
+        the MATLAB BeMoBIL pipeline: ``fit_params`` defaults to
+        ``pybemobil.preproc.utils.DEFAULT_JAMICA_FIT_PARAMS`` (``{"do_reject": True,
+        "rejsig": 3.0, "numrej": 10}``) and any ``fit_params`` you pass are
+        merged over it key by key. Pass
+        ``{"fit_params": {"do_reject": False}}`` to disable rejection.
+        Ignored when a non-jamica method is used.
 
     Returns
     -------
@@ -602,7 +629,7 @@ def compute_ica(
             picks=picks_eeg,
             n_components=n_components,
             random_state=rng_seed,
-            **(jamica_kwargs or {}),
+            **_resolve_jamica_kwargs(jamica_kwargs),
         )
     else:
         _method = "picard" if ica_method == "jamica" else ica_method
