@@ -492,3 +492,74 @@ def test_compute_ica_popularity_vote_labels(rng, kwargs, expected):
         )
     want = [i for i in range(ica.n_components_) if labels[i % 4] in expected]
     assert ica.exclude == want
+
+
+# %% compute_ica jamica defaults
+
+
+@pytest.mark.parametrize(
+    "jamica_kwargs, expected",
+    [
+        (None, {"fit_params": {"do_reject": True, "rejsig": 3.0, "numrej": 10}}),
+        (
+            {"max_iter": 500},
+            {
+                "max_iter": 500,
+                "fit_params": {"do_reject": True, "rejsig": 3.0, "numrej": 10},
+            },
+        ),
+        (
+            {"fit_params": {"do_reject": False}},
+            {"fit_params": {"do_reject": False, "rejsig": 3.0, "numrej": 10}},
+        ),
+        (
+            {"fit_params": {"rejsig": 2.5, "num_models": 2}},
+            {
+                "fit_params": {
+                    "do_reject": True,
+                    "rejsig": 2.5,
+                    "numrej": 10,
+                    "num_models": 2,
+                }
+            },
+        ),
+    ],
+)
+def test_resolve_jamica_kwargs(jamica_kwargs, expected):
+    """AMICA sample rejection is on by default; user fit_params merge over it."""
+    from pybemobil.preproc.utils import (
+        DEFAULT_JAMICA_FIT_PARAMS,
+        _resolve_jamica_kwargs,
+    )
+
+    before = dict(DEFAULT_JAMICA_FIT_PARAMS)
+    assert _resolve_jamica_kwargs(jamica_kwargs) == expected
+    assert DEFAULT_JAMICA_FIT_PARAMS == before  # defaults never mutated
+
+
+def test_compute_ica_passes_amica_rejection_to_jamica(rng, monkeypatch):
+    """compute_ica forwards the default AMICA rejection settings to jamica."""
+    captured = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _fake_fit_ica(epochs, **kwargs):
+        captured.update(kwargs)
+        raise _Stop
+
+    fake = types.ModuleType("jamica")
+    fake.fit_ica = _fake_fit_ica
+    monkeypatch.setitem(sys.modules, "jamica", fake)
+
+    from pybemobil.preproc import utils
+
+    montage = mne.channels.make_standard_montage("easycap-M1")
+    info = mne.create_info(montage.ch_names[:8], 250.0, "eeg")
+    raw = mne.io.RawArray(rng.standard_normal((8, 250 * 20)) * 1e-5, info)
+    raw.set_montage(montage)
+    with pytest.raises(_Stop):
+        utils.compute_ica(
+            raw, filter_bands_ica=(1.0, None), thresh=-1, ica_method="jamica"
+        )
+    assert captured["fit_params"] == {"do_reject": True, "rejsig": 3.0, "numrej": 10}

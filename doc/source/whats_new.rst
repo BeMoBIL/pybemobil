@@ -4,7 +4,18 @@ What's new
 Unreleased
 ----------
 
-Nothing yet.
+- AMICA's likelihood-based sample rejection is now on by default when ICA runs
+  with ``jamica`` (``{"do_reject": True, "rejsig": 3.0, "numrej": 10}``),
+  matching the MATLAB BeMoBIL pipeline (``AMICA_autoreject=1``, 3 SD,
+  10 rounds). Previously no outlier rejection was applied during ICA, so ICA
+  results will differ from 0.1.0. ``fit_params`` passed in ``jamica_kwargs``
+  are merged over these defaults; use
+  ``jamica_kwargs={"fit_params": {"do_reject": False}}`` for the old
+  behaviour. The number of rejected samples is recorded in the provenance
+  descriptor (``amica_rejected_samples``).
+- The :ref:`comparison with the MATLAB pipeline <guide-bemobil>` was corrected:
+  bad channel detection parameters, filtering differences, output files and a
+  working minimal example.
 
 0.1.0
 -----

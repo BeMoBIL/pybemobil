@@ -173,6 +173,12 @@ def _bids_raw_target(fname_out, bids_root=None):
     return Path(bids_root), entities
 
 
+def _amica_n_rejected(ica):
+    """Return the number of samples AMICA rejected, or ``None`` if unknown."""
+    n = getattr(getattr(ica, "amica_result_", None), "n_rejected_", None)
+    return None if n is None else int(n)
+
+
 def get_bad_chs(
     raw,
     pyprep_kwargs=None,
@@ -540,9 +546,13 @@ class EEGPreprocessor:
         ``"picard"``, ``"fastica"``).  Ignored when ``fit_ica=False``.
     jamica_kwargs : dict | None
         Extra keyword arguments forwarded to :func:`jamica.fit_ica` when
-        ``ica_method="jamica"``.  Useful for controlling convergence, e.g.
-        ``{"max_iter": 2000}``.  ``None`` uses jamica's defaults.  Ignored
-        when a non-jamica method is used or ``fit_ica=False``.
+        ``ica_method="jamica"``, e.g. ``{"max_iter": 2000}``.  AMICA's
+        likelihood-based sample rejection is on by default, as in the MATLAB
+        BeMoBIL pipeline (``{"fit_params": {"do_reject": True, "rejsig": 3.0,
+        "numrej": 10}}``); ``fit_params`` you pass are merged over these
+        defaults, so ``{"fit_params": {"do_reject": False}}`` disables it.
+        See :func:`compute_ica`.  Ignored when a non-jamica method is used or
+        ``fit_ica=False``.
     fit_ica : bool
         If ``False``, skip ICA entirely (``raw_clean`` equals ``raw_pre_ica``).
     thresh : float
@@ -1034,6 +1044,7 @@ class EEGPreprocessor:
                 n_excluded=len(ica.exclude),
                 excluded=ica.exclude,
                 thresh=self.thresh,
+                amica_rejected_samples=_amica_n_rejected(ica),
             )
         else:
             warnings.warn(
