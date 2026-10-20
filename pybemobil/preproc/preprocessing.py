@@ -179,6 +179,20 @@ def _amica_n_rejected(ica):
     return None if n is None else int(n)
 
 
+def _find_flat_channels(raw, exclude=(), flat_threshold=1e-15):
+    """Return EEG channels whose std or MAD is below *flat_threshold* (volts).
+
+    Same criterion as PyPREP's ``find_bad_by_nan_flat``.
+    """
+    picks = mne.pick_types(raw.info, eeg=True, exclude=list(exclude))
+    if len(picks) == 0:
+        return []
+    data = raw.get_data(picks=picks)
+    mad = np.median(np.abs(data - np.median(data, axis=1, keepdims=True)), axis=1)
+    flat = (data.std(axis=1) < flat_threshold) | (mad < flat_threshold)
+    return [raw.ch_names[i] for i, f in zip(picks, flat) if f]
+
+
 def get_bad_chs(
     raw,
     pyprep_kwargs=None,
@@ -187,15 +201,19 @@ def get_bad_chs(
     line_noise_crit=None,
     deviation_threshold=3.5,
     ransac=None,
+    highpass=1.0,
 ):
-    """Detect bad EEG channels using PyPREP, FASTER, flatline, and line noise.
+    """Detect bad EEG channels using PyPREP, FASTER and optionally line noise.
 
-    Applies optional notch filtering and an average reference, then runs
-    PyPREP's NoisyChannels (nan/flat, deviation, HF-noise, correlation,
-    and optionally RANSAC), FASTER's channel-level correlation and variance on 1 s
-    fixed-length epochs, and per-channel line-noise z-score detection.
-    Returns a dictionary containing the union of all identified bad channels
-    and per-method breakdowns.
+    Works on a copy of *raw*: high-passes it (PyPREP's noisy-channel
+    criteria expect high-passed data, and slow drifts would otherwise
+    inflate FASTER's variance criterion), applies an average reference,
+    optionally runs a per-channel line-noise z-score criterion, then
+    notch-filters and runs PyPREP's NoisyChannels (NaN/flat, deviation,
+    HF-noise, correlation, and optionally RANSAC) and FASTER's
+    channel-level correlation and variance on 1 s fixed-length epochs.
+    Returns a dictionary containing the union of all identified bad
+    channels and per-method breakdowns. *raw* itself is not modified.
 
     Parameters
     ----------
@@ -237,6 +255,9 @@ def get_bad_chs(
           present; skip silently otherwise.
         - ``True``: always run; raises if no montage / positions available.
         - ``False``: never run.
+    highpass : float | None
+        High-pass cutoff (Hz) applied to the working copy before detection.
+        Default ``1.0``, as PyPREP's PREP pipeline does. ``None`` skips it.
 
     Returns
     -------
@@ -262,17 +283,23 @@ def get_bad_chs(
                 "Use 'europe', 'usa', an array-like, or None."
             )
 
-    # Consensus preprocessing steps before finding bads
-    raw = raw.set_eeg_reference("average", projection=False)
-    if notch_lines is not None:
-        notch_lines_arr = np.asarray(notch_lines)
-        nyquist = raw.info["sfreq"] / 2
-        notch_lines_arr = notch_lines_arr[
-            : np.searchsorted(notch_lines_arr, nyquist, side="right")
-        ]
-        raw.notch_filter(freqs=notch_lines_arr, notch_widths=notch_width)
+    # Flat channels must be found before the average reference: referencing
+    # turns a flat channel into minus the mean of the others, which PyPREP's
+    # flat criterion then no longer recognises. They are kept out of the
+    # reference and out of the other criteria.
+    manual_bads = sorted(set((pyprep_kwargs or {}).get("bad_by_manual") or []))
+    manual_bads = sorted(set(manual_bads) | set(raw.info["bads"]))
+    bad_by_flat = _find_flat_channels(raw, exclude=manual_bads)
+    raw.info["bads"] = sorted(set(manual_bads) | set(bad_by_flat))
 
-    # === Per-channel line noise detection (before PyPREP / FASTER) ===
+    # Consensus preprocessing steps before finding bads (on the copy only)
+    if highpass is not None:
+        raw.filter(l_freq=highpass, h_freq=None, picks="eeg")
+    raw = raw.set_eeg_reference("average", projection=False)
+
+    # === Per-channel line noise detection ===
+    # Runs before the notch filter, which would remove the line noise it
+    # is meant to measure.
     bad_by_line_noise: list[str] = []
     if line_noise_crit is not None and notch_lines is not None:
         bad_by_line_noise = detect_bad_by_line_noise(
@@ -281,13 +308,20 @@ def get_bad_chs(
             z_thresh=float(line_noise_crit),
         )
 
+    if notch_lines is not None:
+        notch_lines_arr = np.asarray(notch_lines)
+        nyquist = raw.info["sfreq"] / 2
+        notch_lines_arr = notch_lines_arr[
+            : np.searchsorted(notch_lines_arr, nyquist, side="right")
+        ]
+        raw.notch_filter(freqs=notch_lines_arr, notch_widths=notch_width)
+
     # === PyPREP ====
     # Merge user kwargs into the defaults (without mutating the caller's dict)
     pyprep_kwargs = {"reject_by_annotation": "omit", **(pyprep_kwargs or {})}
 
-    bad_by_manual = list(pyprep_kwargs.get("bad_by_manual") or [])
-    bad_by_manual = sorted(set(bad_by_manual) | set(raw.info["bads"]))
-    pyprep_kwargs["bad_by_manual"] = bad_by_manual
+    bad_by_manual = manual_bads
+    pyprep_kwargs["bad_by_manual"] = sorted(set(manual_bads) | set(bad_by_flat))
 
     noisy_channels = NoisyChannels(raw, **pyprep_kwargs)
     noisy_channels.find_bad_by_nan_flat()
@@ -303,10 +337,18 @@ def get_bad_chs(
             LOGGER.warning(f"RANSAC bad-channel detection failed: {_exc}")
 
     bads_dict_pyprep = noisy_channels.get_bads(as_dict=True)
+    # PyPREP lists everything passed as bad_by_manual as manual; report the
+    # flat channels found before referencing under their own criterion.
+    bads_dict_pyprep["bad_by_manual"] = list(bad_by_manual)
+    bads_dict_pyprep["bad_by_flat"] = sorted(
+        set(bads_dict_pyprep.get("bad_by_flat", [])) | set(bad_by_flat)
+    )
 
     # === FASTER ====
     epochs = mne.make_fixed_length_epochs(raw, duration=1.0, preload=True)
-    picks = mne.pick_types(epochs.info, eeg=True, exclude=bad_by_manual)
+    picks = mne.pick_types(
+        epochs.info, eeg=True, exclude=sorted(set(bad_by_manual) | set(bad_by_flat))
+    )
     epochs.pick(picks)
     bads_dict_faster = mne_faster.find_bad_channels(
         epochs,
