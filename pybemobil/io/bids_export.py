@@ -177,15 +177,18 @@ def make_bids_dataset_description(
         Funding source strings.
     doi : str | None
         Dataset DOI.
+
+    Fields that are not given are left out of the file instead of being
+    written as empty strings (``"License": ""`` is not valid BIDS metadata).
     """
     mne_bids.make_dataset_description(
         path=str(bids_root),
         name=name,
-        authors=authors or [],
-        data_license=data_license or "",
-        acknowledgements=acknowledgements or "",
-        funding=funding or [],
-        doi=doi or "",
+        authors=authors or None,
+        data_license=data_license or None,
+        acknowledgements=acknowledgements or None,
+        funding=funding or None,
+        doi=doi or None,
         overwrite=True,
     )
     LOGGER.info(f"BIDS dataset_description.json written at {bids_root}")
