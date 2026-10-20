@@ -12,7 +12,6 @@ import os
 import shutil
 import subprocess
 import sys
-import warnings as _warnings
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -575,7 +574,11 @@ def compute_ica(
     -------
     ica : mne.preprocessing.ICA
         Fitted ICA object with ``ica.exclude`` populated according to the
-        label criteria.
+        label criteria. ``ica.pybemobil_fit_info_`` describes the fit that
+        actually ran (``method``, ``requested_method``, ``n_components``,
+        ``rng_seed``, fit parameters, number of epochs and FASTER-dropped
+        epochs); :class:`~pybemobil.preproc.EEGPreprocessor` records it in
+        the provenance descriptor.
     ic_labels : dict
         Output of :func:`mne_icalabel.label_components` containing
         ``"labels"`` and ``"y_pred_proba"`` keys.
@@ -628,6 +631,7 @@ def compute_ica(
     epochs.apply_proj()
 
     bad_epochs = mne_faster.find_bad_epochs(epochs)
+    n_epochs_total = len(epochs)
     if len(bad_epochs) > 0:
         epochs.drop(bad_epochs)
 
@@ -639,9 +643,11 @@ def compute_ica(
             import warnings as _warnings
 
             _warnings.warn(
-                "jamica is not installed; falling back to picard. "
-                "Install with: pip install 'jamica[jax]'",
-                ImportWarning,
+                "jamica is not installed, so ICA falls back to extended-infomax "
+                "picard without AMICA's sample rejection. Results differ from "
+                "the default (AMICA) pipeline. Install it with: "
+                "pip install 'pybemobil[jamica]'",
+                RuntimeWarning,
                 stacklevel=2,
             )
             _use_jamica = False
@@ -655,13 +661,15 @@ def compute_ica(
         rank_dict = mne.compute_rank(epochs.copy().pick(picks_eeg), tol="auto")
         n_components = sum(rank_dict.values())
 
+        _jamica_kw = _resolve_jamica_kwargs(jamica_kwargs)
         ica = _fit_ica(
             epochs,
             picks=picks_eeg,
             n_components=n_components,
             random_state=rng_seed,
-            **_resolve_jamica_kwargs(jamica_kwargs),
+            **_jamica_kw,
         )
+        _fit_settings = {"backend": "jamica", **_jamica_kw}
     else:
         _method = "picard" if ica_method == "jamica" else ica_method
         ica = mne.preprocessing.ICA(
@@ -673,6 +681,20 @@ def compute_ica(
             else None,
         )
         ica.fit(epochs)
+        _fit_settings = {"backend": "mne", "fit_params": dict(ica.fit_params)}
+
+    # What was actually fitted, for provenance (see EEGPreprocessor).
+    ica.pybemobil_fit_info_ = {
+        "method": ica.method,
+        "requested_method": ica_method,
+        "n_components": int(ica.n_components_),
+        "rng_seed": rng_seed,
+        "filter_bands_ica": list(filter_bands_ica),
+        "downsample_ica": downsample_ica,
+        "n_epochs": int(n_epochs_total),
+        "n_epochs_dropped_faster": int(len(bad_epochs)),
+        **_fit_settings,
+    }
 
     _proba = iclabel_label_components(epochs, ica, backend="onnx")
     _pred = np.argmax(_proba, axis=1)
@@ -1009,14 +1031,12 @@ def remove_line(
     if method in ("adaptive", "zapline"):
         try:
             from mne_denoise.zapline import ZapLine as _ZapLine
-        except ImportError:
-            _warnings.warn(
-                "mne_denoise is not installed; remove_line cannot run "
-                f"method={method!r}. Install with: pip install mne-denoise",
-                ImportWarning,
-                stacklevel=2,
-            )
-            return raw.copy()
+        except ImportError as err:
+            raise ImportError(
+                f"remove_line(method={method!r}) needs mne-denoise, a required "
+                "dependency of pybemobil that is missing or broken. Reinstall it "
+                "with: pip install mne-denoise"
+            ) from err
 
         is_adaptive = method == "adaptive"
         if noise_freqs is None and not is_adaptive:
@@ -1050,14 +1070,12 @@ def remove_line(
         try:
             from meegkit.dss import dss_line as _dss_line
             from meegkit.dss import dss_line_iter as _dss_line_iter
-        except ImportError:
-            _warnings.warn(
-                "meegkit is not installed; remove_line cannot run "
-                f"method={method!r}. Install with: pip install meegkit",
-                ImportWarning,
-                stacklevel=2,
-            )
-            return raw.copy()
+        except ImportError as err:
+            raise ImportError(
+                f"remove_line(method={method!r}) needs meegkit, a required "
+                "dependency of pybemobil that is missing or broken. Reinstall it "
+                "with: pip install meegkit"
+            ) from err
 
         eeg_idx = mne.pick_types(raw.info, eeg=True, exclude=[])
         raw_clean = raw.copy()
