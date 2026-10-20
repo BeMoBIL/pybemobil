@@ -43,9 +43,7 @@ def test_epoching_settings_are_recorded(tmp_path):
     assert (step["tmin"], step["tmax"]) == (-0.2, 0.8)
 
 
-def test_epoch_tlimes_is_a_deprecated_alias():
-    """The misspelled epoch_tlimes still works but warns."""
-    with pytest.warns(FutureWarning, match="epoch_tlims"):
-        prep = EpochPreparer({"c": {}}, epoch_tlimes=(-0.1, 0.4))
-    assert prep.epoch_tlims == (-0.1, 0.4)
-    assert prep.epoch_tlimes == (-0.1, 0.4)
+def test_epoch_tlimes_is_gone():
+    """The misspelled epoch_tlimes is no longer accepted."""
+    with pytest.raises(TypeError, match="epoch_tlimes"):
+        EpochPreparer({"c": {}}, epoch_tlimes=(-0.1, 0.4))

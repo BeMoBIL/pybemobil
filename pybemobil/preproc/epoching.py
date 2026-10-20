@@ -83,7 +83,6 @@ class EpochPreparer:
         dict values are retained for epoching.
     epoch_tlims : tuple of float
         ``(tmin, tmax)`` in seconds for epochs relative to the event onset.
-        (``epoch_tlimes`` is accepted as a deprecated alias.)
     baseline : tuple of float | None
         Baseline window ``(tmin, tmax)`` passed to ``mne.Epochs``.
     bandpass_erp : tuple of (float | None, float | None)
@@ -112,18 +111,7 @@ class EpochPreparer:
         baseline: tuple[float | None, float | None] = (-0.2, 0),
         bandpass_erp: tuple[float | None, float | None] = (None, 20.0),
         tshift: float = 0.0,
-        epoch_tlimes: tuple[float, float] | None = None,
     ):
-        if epoch_tlimes is not None:
-            import warnings
-
-            warnings.warn(
-                "EpochPreparer(epoch_tlimes=...) is deprecated and will be removed "
-                "in a future release; use epoch_tlims instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            epoch_tlims = epoch_tlimes
         self.remaps = remaps
         self.epoch_tlims = tuple(epoch_tlims)
         self.baseline = baseline
@@ -234,8 +222,3 @@ class EpochPreparer:
         )
 
         return {label: epochs[label] for label in id_of_interest}
-
-    @property
-    def epoch_tlimes(self):
-        """Deprecated alias of :attr:`epoch_tlims`."""
-        return self.epoch_tlims
