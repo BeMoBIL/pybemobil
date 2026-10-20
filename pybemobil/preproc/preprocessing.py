@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 import warnings
 from pathlib import Path
@@ -90,6 +91,8 @@ def get_derivative_paths(fname_out):
     - ``"dipoles"``: ``sub-01_task-walk_dipoles/`` (one file per IC)
     - ``"trans"``: ``sub-01_task-walk_trans.fif``
     - ``"report"``: ``sub-01_task-walk_report.html``
+    - ``"figures"``: ``sub-01_task-walk_figures/`` (report images, e.g.
+      the joint ERP plots)
 
     All paths are in the folder of *fname_out*. The untouched input is not
     a derivative; it goes to the raw part of the BIDS dataset (see
@@ -128,7 +131,17 @@ def get_derivative_paths(fname_out):
         "dipoles": folder / f"{base}_dipoles",
         "trans": folder / f"{base}_trans.fif",
         "report": folder / f"{base}_report.html",
+        "figures": folder / f"{base}_figures",
     }
+
+
+def _remove_derivatives(paths):
+    """Delete the files and folders in *paths* (from get_derivative_paths)."""
+    for path in paths.values():
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
 
 
 def _bids_raw_target(fname_out, bids_root=None):
@@ -893,6 +906,18 @@ class EEGPreprocessor:
             )
             return self._load_cached_outputs(fname_out)
 
+        # Fail before the (long) computation, not when saving at the end.
+        if fname_out is not None and not overwrite:
+            existing = sorted(
+                p.name for p in get_derivative_paths(fname_out).values() if p.exists()
+            )
+            if existing:
+                raise FileExistsError(
+                    f"Derivatives of {Path(fname_out).name} already exist in "
+                    f"{Path(fname_out).parent}: {existing}. Pass overwrite=True "
+                    "to replace them (or skip_if_exists=True to load them)."
+                )
+
         # --- Source (nothing done) ---
         # The caller's object is never modified: keep it as raw_source and
         # run every step on a preloaded copy.
@@ -1209,9 +1234,18 @@ class EEGPreprocessor:
         bad_ch_dict,
         overwrite,
     ):
-        """Save all pipeline derivatives to disk (see get_derivative_paths)."""
+        """Save all pipeline derivatives to disk (see get_derivative_paths).
+
+        With ``overwrite=True``, every derivative of an earlier run is
+        removed first, so files this run does not produce (an ICA when
+        ``fit_ica=False``, dipoles of ICs that are now ``None``, an old
+        report) cannot be mixed with the new results later by
+        :meth:`reapply_ica` or ``skip_if_exists``.
+        """
         paths = get_derivative_paths(fname_out)
         paths["clean"].parent.mkdir(parents=True, exist_ok=True)
+        if overwrite:
+            _remove_derivatives(paths)
 
         # raw_clean is the primary output and the skip_if_exists sentinel
         raw_clean.save(paths["clean"], overwrite=overwrite, verbose="error")
