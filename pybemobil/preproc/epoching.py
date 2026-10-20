@@ -79,8 +79,9 @@ class EpochPreparer:
         Mapping of condition name → {original_label: target_label}.
         Only annotations whose remapped value appears in the condition's remap
         dict values are retained for epoching.
-    epoch_tlimes : tuple of float
+    epoch_tlims : tuple of float
         ``(tmin, tmax)`` in seconds for epochs relative to the event onset.
+        (``epoch_tlimes`` is accepted as a deprecated alias.)
     baseline : tuple of float | None
         Baseline window ``(tmin, tmax)`` passed to ``mne.Epochs``.
     bandpass_erp : tuple of (float | None, float | None)
@@ -101,13 +102,24 @@ class EpochPreparer:
         self,
         remaps: dict[str, dict[str, str]],
         *,
-        epoch_tlimes: tuple[float, float] = (-0.2, 0.8),
+        epoch_tlims: tuple[float, float] = (-0.2, 0.8),
         baseline: tuple[float | None, float | None] = (-0.2, 0),
         bandpass_erp: tuple[float | None, float | None] = (None, 20.0),
         tshift: float = 0.060,
+        epoch_tlimes: tuple[float, float] | None = None,
     ):
+        if epoch_tlimes is not None:
+            import warnings
+
+            warnings.warn(
+                "EpochPreparer(epoch_tlimes=...) is deprecated and will be removed "
+                "in a future release; use epoch_tlims instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            epoch_tlims = epoch_tlimes
         self.remaps = remaps
-        self.epoch_tlimes = epoch_tlimes
+        self.epoch_tlims = tuple(epoch_tlims)
         self.baseline = baseline
         self.bandpass_erp = bandpass_erp
         self.tshift = tshift
@@ -194,8 +206,8 @@ class EpochPreparer:
             raw_remap,
             event_id=id_of_interest,
             events=events,
-            tmin=self.epoch_tlimes[0],
-            tmax=self.epoch_tlimes[1],
+            tmin=self.epoch_tlims[0],
+            tmax=self.epoch_tlims[1],
             baseline=self.baseline,
         )
 
@@ -205,3 +217,8 @@ class EpochPreparer:
         )
 
         return {label: epochs[label] for label in id_of_interest}
+
+    @property
+    def epoch_tlimes(self):
+        """Deprecated alias of :attr:`epoch_tlims`."""
+        return self.epoch_tlims
