@@ -3,6 +3,24 @@
 from unittest.mock import patch
 
 import mne
+import numpy as np
+import pytest
+
+from pybemobil.preproc.utils import _handle_trans
+
+
+def test_given_transform_needs_no_download():
+    """A Transform is used as is, without fetching fsaverage."""
+    trans = mne.transforms.Transform("head", "mri", np.eye(4))
+    with patch("mne.datasets.fetch_fsaverage", side_effect=AssertionError("fetch")):
+        assert _handle_trans(trans) is trans
+
+
+def test_invalid_trans_raises_before_download():
+    """An invalid trans fails immediately, also without a download."""
+    with patch("mne.datasets.fetch_fsaverage", side_effect=AssertionError("fetch")):
+        with pytest.raises(TypeError, match="Invalid trans"):
+            _handle_trans("fsavg")
 
 
 def test_coregistration_is_rigid():

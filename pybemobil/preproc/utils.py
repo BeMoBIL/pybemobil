@@ -452,17 +452,15 @@ def _handle_trans(trans, info=None):
     -------
     mne.transforms.Transform
     """
-    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
-    fpath_fsaverage_trans = fs_dir / "bem" / "fsaverage-trans.fif"
+    if isinstance(trans, mne.transforms.Transform):
+        return trans  # no fsaverage download needed
+    if trans is not None and trans not in ("fsaverage", "fit"):
+        raise TypeError(f"Invalid trans: {trans!r}")
 
-    if trans is None or (isinstance(trans, str) and trans == "fsaverage"):
-        return mne.transforms.read_trans(fpath_fsaverage_trans)
-    elif isinstance(trans, str) and trans == "fit":
+    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+    if trans == "fit":
         return auto_coreg_fsaverage(info, fs_dir.parent)
-    else:
-        if not isinstance(trans, mne.transforms.Transform):
-            raise TypeError(f"Invalid trans: {trans!r}")
-        return trans
+    return mne.transforms.read_trans(fs_dir / "bem" / "fsaverage-trans.fif")
 
 
 #: AMICA likelihood-based sample rejection used by default with jamica. Matches
