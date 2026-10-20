@@ -18,8 +18,10 @@ from pyprep import NoisyChannels
 
 from pybemobil.io.utils import NumpyEncoder as _NumpyEncoder
 from pybemobil.preproc.utils import (
+    _DEFAULT_INCLUDE_LABELS,
     StepTimer,
     _annotate_break_iter,
+    _check_iclabel_names,
     _handle_trans,
     append_desc,
     compute_asr,
@@ -37,17 +39,6 @@ NumpyEncoder = _NumpyEncoder
 
 LOGGER = logging.getLogger(__name__)
 
-# All ICLabel classes except "eye blink" (BeMoBIL: iclabel_classes = [1 2 4 5 6 7])
-_DEFAULT_INCLUDE_LABELS = frozenset(
-    {
-        "brain",
-        "muscle artifact",
-        "heart beat",
-        "line noise",
-        "channel noise",
-        "other",
-    }
-)
 
 # %% Functions
 
@@ -685,8 +676,9 @@ class EEGPreprocessor:
         whichever class has the highest predicted probability; it is excluded
         if that class is not in *include_labels* (or is in *exclude_labels*).
         Any value in ``[0, 1]`` switches to **probability-threshold** mode:
-        an IC is excluded only when its artifact-class probability meets or
-        exceeds this value.
+        an IC is excluded only when its winning class is one to remove *and*
+        that class's probability is at least this value; ICs whose winning
+        class is uncertain are kept.
     exclude_labels : list of str | None
         ICLabel categories to exclude. Mutually exclusive with
         *include_labels*.
@@ -794,6 +786,10 @@ class EEGPreprocessor:
             )
         if exclude_labels is None and include_labels is None:
             include_labels = _DEFAULT_INCLUDE_LABELS
+        if exclude_labels is not None:
+            _check_iclabel_names(exclude_labels, "exclude_labels")
+        else:
+            _check_iclabel_names(include_labels, "include_labels")
 
         # Validate line_noise_freq early so errors surface at construction time
         if isinstance(line_noise_freq, str) and line_noise_freq not in (
