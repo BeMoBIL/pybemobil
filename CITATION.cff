@@ -10,8 +10,8 @@ authors:
     given-names: Roy Eric
     email: eric.wieske@gmail.com
     affiliation: Technische Universität Berlin
-version: 0.1.0
-date-released: 2026-10-19
+version: 0.2.0
+date-released: 2026-10-20
 # Zenodo concept DOI: resolves to the latest archived version.
 doi: 10.5281/zenodo.23480659
 license: BSD-3-Clause
