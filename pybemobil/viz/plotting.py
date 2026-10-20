@@ -487,7 +487,8 @@ def plot_TFR(
     tmax : float | None
         End time after event, by default 1.
     baseline : tuple | None
-        Time interval for baseline correction, by default (None, 0).
+        Time interval for baseline correction. Default ``None`` (no baseline
+        correction).
     picks : list of str or list of int | None
         Channel names or, in the case of ICA, channel indices, e.g., [3].
         Defaults to ``None``, which means picking all channels or sources.
@@ -534,23 +535,24 @@ def plot_TFR(
 
     # get info and other parameters
     info = next(iter(tfr_dict.values())).info
-    channel_list = [
-        ch for ch in info.ch_names if info.get_channel_types(picks=[ch])[0] == "eeg"
-    ]
+    # ICA sources are "misc" channels named ICA000, ICA001, ...
+    is_sources = is_sources or all("ICA" in ch_name for ch_name in info.ch_names)
+    if is_sources:
+        channel_list = [ch for ch in info.ch_names if "ICA" in ch] or info.ch_names
+    else:
+        channel_list = [
+            ch for ch in info.ch_names if info.get_channel_types(picks=[ch])[0] == "eeg"
+        ]
 
     if picks is None or not list(picks):
         picks = channel_list
+    if is_sources:
+        picks = [f"ICA{i:03}" if isinstance(i, int) else i for i in picks]
 
     if not combine:
         ch_list = picks
     else:
         ch_list = [picks]
-
-    # Add sensor insets if available
-    if is_sources or all(["ICA" in ch_name for ch_name in channel_list]):
-        # Working with ICA sources
-        picks = [f"ICA{i:03}" if isinstance(i, int) else i for i in picks]
-        is_sources = True
 
     show_sensors = True
     if not info.get("dig") or is_sources:
@@ -1654,6 +1656,17 @@ def _prepare_psd(
     return psd_dict
 
 
+def _tfr_kwargs_for(inst, tfr_kwargs):
+    """Return *tfr_kwargs*, picking ICA sources (misc channels) when needed.
+
+    ``compute_tfr`` picks only data channels by default, which excludes the
+    misc-typed ICA source channels.
+    """
+    if "picks" not in tfr_kwargs and all("ICA" in ch for ch in inst.ch_names):
+        return {**tfr_kwargs, "picks": "all"}
+    return tfr_kwargs
+
+
 def _prepare_tfr(
     inst_dict,
     *,
@@ -1745,7 +1758,10 @@ def _prepare_tfr(
                     LOGGER.info(f"Epochs were passed. Computing TFR for {key} - {inst}")
                     temp_list.append(
                         _baseline_crop_tfr(
-                            inst.compute_tfr(**tfr_kwargs), tmin, tmax, baseline
+                            inst.compute_tfr(**_tfr_kwargs_for(inst, tfr_kwargs)),
+                            tmin,
+                            tmax,
+                            baseline,
                         ).average()
                     )
                 else:
@@ -1771,7 +1787,10 @@ def _prepare_tfr(
             # case: single Epochs
             LOGGER.info(f"Epochs were passed. Computing TFR for {key} - {inst_list}")
             tfr_dict[key] = _baseline_crop_tfr(
-                inst_list.compute_tfr(**tfr_kwargs), tmin, tmax, baseline
+                inst_list.compute_tfr(**_tfr_kwargs_for(inst_list, tfr_kwargs)),
+                tmin,
+                tmax,
+                baseline,
             ).average()
         else:
             raise TypeError(f"Expected EpochsTFR or AverageTFR, got {type(inst_list)}.")

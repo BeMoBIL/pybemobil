@@ -91,3 +91,15 @@ def test_erp_spans_drawn_on_used_axes(epochs_abc, kwargs):
     )
     assert sum(len(ax.patches) for ax in fig.axes) >= 2
     plt.close("all")
+
+
+def test_tfr_on_ica_sources_without_picks(raw_abc, epochs_abc):
+    """plot_TFR plots ICA sources (misc channels) when picks is None."""
+    ica = mne.preprocessing.ICA(n_components=4, method="picard", random_state=0)
+    ica.fit(raw_abc.copy().filter(1, None, verbose=False), verbose=False)
+    sources = ica.get_sources(epochs_abc)
+    out = plotting.plot_TFR(
+        {"a": sources["a"]}, freqs=np.arange(4, 12.0), is_sources=True
+    )
+    assert out
+    plt.close("all")
