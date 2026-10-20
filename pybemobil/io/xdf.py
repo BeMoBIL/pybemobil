@@ -22,6 +22,7 @@ import numpy as np
 import pyxdf
 
 from pybemobil.io.alignment import (
+    ALIGNMENT_METHODS,
     _compute_effective_srate,
     _is_irregular,
     align_stream_to_timestamps,
@@ -534,6 +535,23 @@ class XDFLoader:
         self.max_nan_gap_s = max_nan_gap_s
         self.on_mismatch = on_mismatch
         self._eeg_timestamps: np.ndarray | None = None
+        self._validate()
+
+    def _validate(self) -> None:
+        """Check option values early, before a long XDF file is read."""
+        if self.on_mismatch not in ("crop", "pad"):
+            raise ValueError(
+                f"on_mismatch must be 'crop' or 'pad', got {self.on_mismatch!r}."
+            )
+        methods = {"alignment_method": self.alignment_method}
+        for label, spec in self.special_streams.items():
+            if "method" in spec:
+                methods[f"special_streams[{label!r}]['method']"] = spec["method"]
+        for where, method in methods.items():
+            if method not in ALIGNMENT_METHODS:
+                raise ValueError(
+                    f"{where} must be one of {ALIGNMENT_METHODS}, got {method!r}."
+                )
 
     def load(self, path: str | Path) -> MultimodalRecording:
         """Load an XDF file and return a :class:`MultimodalRecording`.

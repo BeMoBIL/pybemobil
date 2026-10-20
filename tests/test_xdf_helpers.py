@@ -531,3 +531,29 @@ def test_build_raw_keeps_non_voltage_aux_units(eeg_stream, caplog):
         raw, _, _, _ = loader._build_raw([eeg_stream, gaze])
     np.testing.assert_allclose(raw.get_data(picks="gx")[0, :-10], 640.0)
     assert "Unrecognised unit" not in caplog.text
+
+
+# %% Option validation
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"on_mismatch": "cropp"},
+        {"alignment_method": "cubic"},
+        {"special_streams": {"ecg": {"name": "ecg", "method": "spline"}}},
+    ],
+)
+def test_loader_rejects_invalid_options(kwargs):
+    """Typos in option values raise instead of silently using a default."""
+    with pytest.raises(ValueError, match="must be"):
+        XDFLoader(**kwargs)
+
+
+def test_align_rejects_unknown_method():
+    """align_stream_to_timestamps does not fall back to linear for typos."""
+    from pybemobil.io.alignment import align_stream_to_timestamps
+
+    ts = np.arange(10.0)
+    with pytest.raises(ValueError, match="Unknown alignment method"):
+        align_stream_to_timestamps(ts, ts, ts, method="cubic")
