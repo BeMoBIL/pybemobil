@@ -9,6 +9,7 @@ import logging
 import time
 import warnings
 from pathlib import Path
+from secrets import randbits
 
 import mne
 import mne_faster
@@ -882,11 +883,7 @@ class EEGPreprocessor:
         set_descriptor(raw, init_descriptor(src, pipeline="EEGPreprocessor.run_raw"))
         # A fixed seed for this run, recorded so the run can be reproduced
         # even when the user did not set one.
-        seed = (
-            int(self.rng_seed)
-            if self.rng_seed is not None
-            else int(np.random.SeedSequence().entropy % (2**32))
-        )
+        seed = int(self.rng_seed) if self.rng_seed is not None else randbits(31)
         append_desc(raw, name="settings", rng_seed=seed)
 
         # --- Channel renaming ---

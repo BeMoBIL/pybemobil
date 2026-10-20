@@ -123,6 +123,7 @@ def test_run_raw_records_drawn_seed_and_keeps_kwargs():
     steps = {s["name"]: s for s in get_descriptor(raw_out)["steps"]}
     seed = steps["settings"]["rng_seed"]
     assert isinstance(seed, int)
+    assert 0 <= seed < 2**31
     assert steps["ica"]["method"] == "picard"
     assert steps["ica"]["requested_method"] == "picard"
     assert steps["ica"]["rng_seed"] == seed
