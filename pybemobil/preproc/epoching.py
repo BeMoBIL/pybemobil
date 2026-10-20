@@ -9,6 +9,8 @@ from pathlib import Path
 import mne
 import numpy as np
 
+from pybemobil.preproc.utils import append_desc
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -79,17 +81,22 @@ class EpochPreparer:
         Mapping of condition name → {original_label: target_label}.
         Only annotations whose remapped value appears in the condition's remap
         dict values are retained for epoching.
-    epoch_tlimes : tuple of float
+    epoch_tlims : tuple of float
         ``(tmin, tmax)`` in seconds for epochs relative to the event onset.
+        (``epoch_tlimes`` is accepted as a deprecated alias.)
     baseline : tuple of float | None
         Baseline window ``(tmin, tmax)`` passed to ``mne.Epochs``.
     bandpass_erp : tuple of (float | None, float | None)
         ``(l_freq, h_freq)`` bandpass applied before epoching.
     tshift : float
-        Stimulus onset delay in seconds.  Event annotation onsets are
-        shifted forward by this amount so that ``t=0`` aligns with actual
-        stimulus presentation; ``BAD_*`` / ``EDGE`` annotations are not
-        shifted.  Set to ``0`` to disable.
+        Stimulus onset delay in seconds. Event annotation onsets are
+        shifted forward by this amount so that ``t=0`` aligns with the
+        actual stimulus presentation; ``BAD_*`` / ``EDGE`` annotations are
+        not shifted. Default ``0`` (no shift). The delay between a marker
+        and the stimulus depends on the display and trigger setup of each
+        lab, so measure it (e.g. with a photodiode on the screen) and pass
+        it here. The value used is recorded in the provenance descriptor of
+        the epochs.
 
     Notes
     -----
@@ -101,13 +108,24 @@ class EpochPreparer:
         self,
         remaps: dict[str, dict[str, str]],
         *,
-        epoch_tlimes: tuple[float, float] = (-0.2, 0.8),
+        epoch_tlims: tuple[float, float] = (-0.2, 0.8),
         baseline: tuple[float | None, float | None] = (-0.2, 0),
         bandpass_erp: tuple[float | None, float | None] = (None, 20.0),
-        tshift: float = 0.060,
+        tshift: float = 0.0,
+        epoch_tlimes: tuple[float, float] | None = None,
     ):
+        if epoch_tlimes is not None:
+            import warnings
+
+            warnings.warn(
+                "EpochPreparer(epoch_tlimes=...) is deprecated and will be removed "
+                "in a future release; use epoch_tlims instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            epoch_tlims = epoch_tlimes
         self.remaps = remaps
-        self.epoch_tlimes = epoch_tlimes
+        self.epoch_tlims = tuple(epoch_tlims)
         self.baseline = baseline
         self.bandpass_erp = bandpass_erp
         self.tshift = tshift
@@ -190,12 +208,23 @@ class EpochPreparer:
             )
         id_of_interest = {t: ids[t] for t in targets if t in ids}
 
+        append_desc(
+            raw_remap,
+            name="epoching",
+            condition=cond,
+            tshift=float(self.tshift),
+            tmin=float(self.epoch_tlims[0]),
+            tmax=float(self.epoch_tlims[1]),
+            baseline=None if self.baseline is None else list(self.baseline),
+            bandpass_erp=list(self.bandpass_erp),
+            event_id=id_of_interest,
+        )
         epochs = mne.Epochs(
             raw_remap,
             event_id=id_of_interest,
             events=events,
-            tmin=self.epoch_tlimes[0],
-            tmax=self.epoch_tlimes[1],
+            tmin=self.epoch_tlims[0],
+            tmax=self.epoch_tlims[1],
             baseline=self.baseline,
         )
 
@@ -205,3 +234,8 @@ class EpochPreparer:
         )
 
         return {label: epochs[label] for label in id_of_interest}
+
+    @property
+    def epoch_tlimes(self):
+        """Deprecated alias of :attr:`epoch_tlims`."""
+        return self.epoch_tlims
