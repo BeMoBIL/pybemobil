@@ -33,11 +33,13 @@ loader = XDFLoader(
         "ecg": {"name": "ECG", "type": "ECG", "method": "sinc"},
         # Pupil Labs gaze at ~200 Hz - use pchip for smooth physiological signal
         "gaze": {"name": "pupil_capture", "type": "Gaze", "method": "pchip"},
-        # Button box / trigger channel - use stim to preserve sparse pulses
-        "stim": {"name": "TriggersFromStim", "type": "Markers", "method": "stim"},
+        # Button box sampled as a regular-rate TTL channel - use stim to
+        # preserve sparse pulses. (Marker streams with nominal_srate == 0
+        # are not special streams: they become annotations automatically.)
+        "button": {"name": "ButtonBox", "type": "EXG", "method": "stim"},
     },
     alignment_method="pchip",  # default for any unlisted special streams
-    on_mismatch="crop",
+    on_mismatch="pad",  # keep the full EEG range
 )
 
 # %% Load XDF file
@@ -45,12 +47,14 @@ loader = XDFLoader(
 # Uncomment the line below once XDF_PATH is set.
 # recording = loader.load(XDF_PATH)
 #
-# The returned MultimodalRecording has four fields:
+# The returned MultimodalRecording has five fields:
 #
 #   recording.raw        - mne.io.RawArray, Tier-1 streams aligned to a common grid
 #   recording.tier2      - dict: {label: (data, timestamps_s)} at native rate
 #   recording.events     - dict: {label: (descs, timestamps_s)} for irregular streams
 #   recording.session_t0 - float, absolute LSL timestamp of t=0 in raw
+#   recording.eeg_timestamps - LSL timestamp of every native-rate EEG sample
+#                          (maps Tier-2 / event times onto raw times exactly)
 #
 # Example access pattern (shown on a placeholder object):
 

@@ -39,6 +39,9 @@ import numpy as np
 import scipy.interpolate
 import scipy.signal
 
+#: Methods accepted by :func:`align_stream_to_timestamps`.
+ALIGNMENT_METHODS = ("linear", "pchip", "sinc", "nearest", "stim")
+
 # ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
@@ -349,6 +352,14 @@ def align_stream_to_timestamps(
     aligned : (n_target, n_channels)
         Data evaluated at *tgt_ts*.
     """
+    if method not in ALIGNMENT_METHODS:
+        raise ValueError(
+            f"Unknown alignment method {method!r}; expected one of {ALIGNMENT_METHODS}."
+        )
+    if nan_gap_method not in ("linear", "pchip"):
+        raise ValueError(
+            f"Unknown nan_gap_method {nan_gap_method!r}; expected 'linear' or 'pchip'."
+        )
     data = np.asarray(data, dtype=float)
     if data.ndim == 1:
         data = data[:, np.newaxis]

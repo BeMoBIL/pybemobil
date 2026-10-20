@@ -274,20 +274,33 @@ def test_build_raw_millivolt_units():
     np.testing.assert_allclose(raw.get_data()[0], 1e-3)
 
 
-def test_build_raw_crop_aligns_to_eeg_samples(eeg_stream):
-    """In crop mode t=0 is the first kept EEG sample and aux data match it."""
+def test_build_raw_aux_aligns_to_eeg_samples(eeg_stream):
+    """t=0 is the first EEG sample and aux data match the EEG sample times."""
     ts = T0 + 2.0013 + np.arange(0, 6, 1 / 120)  # not on the EEG sample grid
     gaze = _stream("gaze", "Gaze", ts, np.c_[ts - T0, ts - T0], 120, ["gx", "gy"])
     mk = _stream("mk", "Markers", [T0 + 4.0], [["m"]], 0)
-    loader = XDFLoader(special_streams={"gaze": {"name": "gaze"}}, on_mismatch="crop")
+    loader = XDFLoader(special_streams={"gaze": {"name": "gaze"}})
     raw, _, _, session_t0 = loader._build_raw([eeg_stream, gaze, mk])
 
     eeg_ts = eeg_stream["time_stamps"]
-    kept = eeg_ts[(eeg_ts >= ts[0]) & (eeg_ts <= ts[-1])]
-    assert session_t0 == pytest.approx(kept[0])
-    # gaze channel holds its own LSL time, so it must equal the EEG sample time
-    np.testing.assert_allclose(raw.get_data(picks="gx")[0], kept - T0, atol=1e-9)
-    np.testing.assert_allclose(raw.annotations.onset, [T0 + 4.0 - session_t0])
+    assert session_t0 == pytest.approx(eeg_ts[0])
+    assert raw.n_times == len(eeg_ts)
+    # gaze holds its own LSL time, so where it covers the EEG it must equal
+    # the EEG sample time
+    covered = (eeg_ts >= ts[0]) & (eeg_ts <= ts[-1])
+    np.testing.assert_allclose(
+        raw.get_data(picks="gx")[0, covered], eeg_ts[covered] - T0, atol=1e-9
+    )
+    np.testing.assert_allclose(
+        raw.annotations.onset[raw.annotations.description == "m"],
+        [T0 + 4.0 - session_t0],
+    )
+
+
+def test_loader_rejects_crop_with_explanation():
+    """Cropping is not offered because of frequent MoBI dropouts."""
+    with pytest.raises(ValueError, match="dropouts"):
+        XDFLoader(on_mismatch="crop")
 
 
 def test_build_raw_missing_annotation_covers_last_sample(eeg_stream):
@@ -326,3 +339,234 @@ def test_set_montage_sources(tmp_path, kind):
     XDFLoader(montage=spec)._set_montage(raw)
     got = raw.get_montage().get_positions()["ch_pos"]
     assert set(got) == {"Cz", "Pz"}
+
+
+# %% Timing: nominal rate, dropouts, drift
+
+
+def test_build_raw_uses_nominal_srate():
+    """The sampling rate is nominal_srate, not pyxdf's effective_srate."""
+    ts = T0 + np.arange(0, 4, 1 / 500)
+    eeg = _stream("eeg", "EEG", ts, np.zeros((len(ts), 1)), 500, ["Cz"], ["uV"], "eeg")
+    eeg["info"]["effective_srate"] = 400.0  # e.g. lowered by a dropout
+    raw, _, _, _ = XDFLoader()._build_raw([eeg])
+    assert raw.info["sfreq"] == 500
+
+
+def _gap_eeg(sfreq=500.0, gap=(4.0, 6.0), duration=10.0):
+    t = np.arange(0, duration, 1 / sfreq)
+    t = t[(t < gap[0]) | (t >= gap[1])]
+    ts = T0 + t
+    x = np.sin(2 * np.pi * 10 * t)
+    eeg = _stream("eeg", "EEG", ts, np.c_[x], sfreq, ["Cz"], ["V"], "eeg")
+    eeg["info"]["effective_srate"] = (len(ts) - 1) / (ts[-1] - ts[0])
+    return eeg
+
+
+def test_build_raw_fills_eeg_dropout(caplog):
+    """A dropout is filled and annotated, and markers keep their LSL times."""
+    eeg = _gap_eeg()
+    mk = _stream("mk", "Markers", [T0 + 3.0, T0 + 8.0], [["a"], ["b"]], 0)
+    with caplog.at_level(logging.WARNING):
+        raw, _, _, _ = XDFLoader()._build_raw([eeg, mk])
+    assert raw.info["sfreq"] == 500
+    assert raw.n_times == 5000
+    ann = {
+        d: (o, dur)
+        for d, o, dur in zip(
+            *(
+                raw.annotations.description,
+                raw.annotations.onset,
+                raw.annotations.duration,
+            )
+        )
+    }
+    np.testing.assert_allclose(ann["a"][0], 3.0)
+    np.testing.assert_allclose(ann["b"][0], 8.0)
+    np.testing.assert_allclose(ann["BAD_eeg_missing"], (4.0, 2.0), atol=1e-9)
+    # samples after the gap are at their true time again
+    t = raw.times
+    after = t >= 6.0
+    np.testing.assert_allclose(
+        raw.get_data()[0, after], np.sin(2 * np.pi * 10 * t[after]), atol=1e-9
+    )
+    assert "dropout" in caplog.text
+
+
+def test_build_raw_gap_aux_alignment_matches_eeg_grid():
+    """Aux streams are aligned to the filled grid, including after the gap."""
+    eeg = _gap_eeg()
+    ts = T0 + np.arange(0, 10, 1 / 100)
+    clock = _stream("clk", "Clock", ts, np.c_[ts - T0], 100, ["clk"])
+    loader = XDFLoader(special_streams={"clk": {"name": "clk"}})
+    raw, _, _, _ = loader._build_raw([eeg, clock])
+    covered = raw.times <= 9.99  # the clock stream ends 8 ms before the EEG
+    np.testing.assert_allclose(
+        raw.get_data(picks="clk")[0, covered], raw.times[covered], atol=1e-6
+    )
+
+
+@pytest.mark.parametrize("kind", ["jitter", "chunked"])
+def test_build_raw_no_false_gaps(kind, caplog):
+    """Timestamp jitter and chunked timestamps are not mistaken for dropouts."""
+    sfreq = 500.0
+    t = np.arange(0, 10, 1 / sfreq)
+    if kind == "jitter":
+        t = t + np.random.default_rng(1).uniform(-0.45, 0.45, t.size) / sfreq
+    else:  # 20 samples share the timestamp of the chunk's last sample
+        t = (np.floor(np.arange(t.size) / 20) * 20 + 19) / sfreq
+    eeg = _stream(
+        "eeg", "EEG", T0 + t, np.zeros((t.size, 1)), sfreq, ["Cz"], ["V"], "eeg"
+    )
+    with caplog.at_level(logging.WARNING):
+        raw, _, _, _ = XDFLoader()._build_raw([eeg])
+    assert raw.n_times == t.size
+    assert "BAD_eeg_missing" not in raw.annotations.description
+    assert "dropout" not in caplog.text
+
+
+def test_build_raw_markers_follow_clock_drift(caplog):
+    """With a drifting device clock, markers stay on the sample they belong to."""
+    sfreq = 500.0
+    n = 5000
+    ts = T0 + np.arange(n) / (sfreq * 1.005)  # device runs 0.5 % fast
+    eeg = _stream("eeg", "EEG", ts, np.zeros((n, 1)), sfreq, ["Cz"], ["V"], "eeg")
+    mk = _stream("mk", "Markers", [ts[4000]], [["m"]], 0)
+    with caplog.at_level(logging.WARNING):
+        raw, _, _, _ = XDFLoader()._build_raw([eeg, mk])
+    np.testing.assert_allclose(raw.annotations.onset, [4000 / sfreq])
+    assert "differs from the nominal" in caplog.text
+
+
+def _write_xdf(path, eeg_ts, eeg_data, sfreq, markers):
+    """Write a minimal XDF file (EEG stream plus one marker stream)."""
+    import struct
+
+    def chunk(tag, content):
+        body = struct.pack("<H", tag) + content
+        return struct.pack("<B", 4) + struct.pack("<I", len(body)) + body
+
+    def varlen(n):
+        return struct.pack("<B", 4) + struct.pack("<I", n)
+
+    chans = "".join(
+        f"<channel><label>ch{i}</label><type>EEG</type><unit>microvolts</unit>"
+        "</channel>"
+        for i in range(eeg_data.shape[1])
+    )
+    eeg_xml = (
+        '<?xml version="1.0"?><info><name>eeg</name><type>EEG</type>'
+        f"<channel_count>{eeg_data.shape[1]}</channel_count>"
+        f"<nominal_srate>{sfreq}</nominal_srate><channel_format>float32"
+        "</channel_format><source_id>eeg</source_id>"
+        f"<desc><channels>{chans}</channels></desc></info>"
+    )
+    mk_xml = (
+        '<?xml version="1.0"?><info><name>mk</name><type>Markers</type>'
+        "<channel_count>1</channel_count><nominal_srate>0</nominal_srate>"
+        "<channel_format>string</channel_format><source_id>mk</source_id></info>"
+    )
+    eeg_samples = struct.pack("<I", 1) + varlen(len(eeg_ts))
+    for t, row in zip(eeg_ts, eeg_data):
+        eeg_samples += (
+            struct.pack("<B", 8)
+            + struct.pack("<d", t)
+            + struct.pack(f"<{len(row)}f", *row)
+        )
+    mk_samples = struct.pack("<I", 2) + varlen(len(markers))
+    for t, s in markers:
+        b = s.encode()
+        mk_samples += struct.pack("<B", 8) + struct.pack("<d", t) + varlen(len(b)) + b
+
+    def footer(sid, first, last, n):
+        xml = (
+            f'<?xml version="1.0"?><info><first_timestamp>{first}</first_timestamp>'
+            f"<last_timestamp>{last}</last_timestamp><sample_count>{n}"
+            "</sample_count><clock_offsets></clock_offsets></info>"
+        )
+        return chunk(6, struct.pack("<I", sid) + xml.encode())
+
+    blob = b"XDF:" + chunk(
+        1, b'<?xml version="1.0"?><info><version>1.0</version></info>'
+    )
+    blob += chunk(2, struct.pack("<I", 1) + eeg_xml.encode())
+    blob += chunk(2, struct.pack("<I", 2) + mk_xml.encode())
+    blob += chunk(3, eeg_samples) + chunk(3, mk_samples)
+    blob += footer(1, eeg_ts[0], eeg_ts[-1], len(eeg_ts))
+    blob += footer(2, markers[0][0], markers[-1][0], len(markers))
+    path.write_bytes(blob)
+
+
+@pytest.mark.parametrize("dejitter", [False, True])
+def test_load_real_xdf_with_dropout(tmp_path, dejitter):
+    """End to end through pyxdf: a 2 s dropout keeps rate, spectrum and events."""
+    sfreq = 500.0
+    t = np.arange(0, 10, 1 / sfreq)
+    t = t[(t < 4) | (t >= 6)]
+    x = 10 * np.sin(2 * np.pi * 50 * t)
+    path = tmp_path / "gap.xdf"
+    _write_xdf(
+        path, T0 + t, np.c_[x, x], sfreq, [(T0 + 3.0, "pre"), (T0 + 8.0, "post")]
+    )
+
+    raw = XDFLoader(dejitter_timestamps=dejitter).load(path).raw
+    assert raw.info["sfreq"] == sfreq
+    desc = list(raw.annotations.description)
+    onsets = dict(zip(desc, raw.annotations.onset))
+    assert set(desc) == {"pre", "post", "BAD_eeg_missing"}
+    np.testing.assert_allclose([onsets["pre"], onsets["post"]], [3.0, 8.0], atol=1e-6)
+    good = raw.copy().crop(6.0, None)
+    psd = good.compute_psd(fmax=100, picks="ch0", verbose=False)
+    assert psd.freqs[np.argmax(psd.get_data()[0])] == pytest.approx(50, abs=1)
+
+
+# %% Units of auxiliary streams
+
+
+def test_build_raw_scales_aux_voltage_units(eeg_stream):
+    """An ECG in microvolts from a separate amplifier is converted to volts."""
+    ts = T0 + np.arange(0, 10, 1 / 250)
+    ecg = _stream(
+        "ecg", "ECG", ts, np.full((len(ts), 1), 1000.0), 250, ["ECG"], ["uV"], "ecg"
+    )
+    loader = XDFLoader(special_streams={"ecg": {"name": "ecg"}})
+    raw, _, _, _ = loader._build_raw([eeg_stream, ecg])
+    np.testing.assert_allclose(raw.get_data(picks="ECG")[0, :-10], 1e-3)
+
+
+def test_build_raw_keeps_non_voltage_aux_units(eeg_stream, caplog):
+    """Gaze in pixels is not rescaled and does not warn about volts."""
+    ts = T0 + np.arange(0, 10, 1 / 120)
+    gaze = _stream("gaze", "Gaze", ts, np.full((len(ts), 1), 640.0), 120, ["gx"])
+    gaze["info"]["desc"][0]["channels"][0]["channel"][0]["unit"] = ["pixels"]
+    loader = XDFLoader(special_streams={"gaze": {"name": "gaze"}})
+    with caplog.at_level(logging.WARNING):
+        raw, _, _, _ = loader._build_raw([eeg_stream, gaze])
+    np.testing.assert_allclose(raw.get_data(picks="gx")[0, :-10], 640.0)
+    assert "Unrecognised unit" not in caplog.text
+
+
+# %% Option validation
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"on_mismatch": "trim"},
+        {"alignment_method": "cubic"},
+        {"special_streams": {"ecg": {"name": "ecg", "method": "spline"}}},
+    ],
+)
+def test_loader_rejects_invalid_options(kwargs):
+    """Typos in option values raise instead of silently using a default."""
+    with pytest.raises(ValueError, match="must be"):
+        XDFLoader(**kwargs)
+
+
+def test_align_rejects_unknown_method():
+    """align_stream_to_timestamps does not fall back to linear for typos."""
+    from pybemobil.io.alignment import align_stream_to_timestamps
+
+    ts = np.arange(10.0)
+    with pytest.raises(ValueError, match="Unknown alignment method"):
+        align_stream_to_timestamps(ts, ts, ts, method="cubic")
