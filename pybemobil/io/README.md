@@ -35,9 +35,12 @@ approach uses the actual LSL timestamps carried in every XDF stream.
    measurements with the LSL network during recording. These are stored in the
    XDF file and applied on load, placing all stream timestamps on a shared
    reference clock.
-2. **Dejittering** (on by default): a running linear regression smooths
-   per-sample timestamp jitter, giving cleaner source timestamps for
-   interpolation.
+2. **Dejittering** (optional; `XDFLoader` turns it off by default with
+   `dejitter_timestamps=False`): a linear fit of timestamps against sample
+   index smooths per-sample jitter. This assumes a constant sampling rate,
+   which distorts streams with genuinely variable intervals (e.g.
+   eye-tracking), and the loader's own alignment works on the raw
+   timestamps.
 
 **What pyxdf does *not* do**: resampling, interpolation, or alignment between
 streams. That is the responsibility of this module.
@@ -88,7 +91,9 @@ attached as MNE annotations on the Raw object.
 
 All Tier-1 auxiliary streams are aligned via `align_stream_to_timestamps`,
 which interpolates source data at the EEG target timestamps using the actual
-LSL timestamps of both streams. Three methods are available:
+LSL timestamps of both streams. Five methods are available: `'linear'`,
+`'pchip'` (default), `'sinc'`, `'nearest'` and `'stim'`. Any other value
+raises a `ValueError`.
 
 ### `'linear'`
 
@@ -215,27 +220,57 @@ exclude these regions via the annotations.
 Devices may start recording at slightly different times. For example, if the
 ECG amplifier connects 2 seconds after EEG acquisition begins:
 
-- `on_mismatch='crop'` (default): trim the recording to the intersection of
-  all Tier-1 stream time ranges. The first 2 seconds of EEG are discarded.
+- `on_mismatch='pad'` (default): keep the full EEG time range. The ECG
+  channels have NaN (→ zero + `BAD_ecg_missing` annotation) for the first 2
+  seconds. Preferable for continuous recordings where trimming would cut
+  into usable data.
+
+- `on_mismatch='crop'`: trim the recording to the intersection of all
+  Tier-1 stream time ranges. The first 2 seconds of EEG are discarded.
   Simple and lossless for the retained window.
 
-- `on_mismatch='pad'`: keep the full EEG time range. The ECG channels have
-  NaN (→ zero + annotation) for the first 2 seconds. Preferable for
-  continuous recordings where trimming would cut into usable data.
-
 ---
+
+## EEG sampling rate, dropouts and clock drift
+
+The Raw object uses the EEG stream's **nominal** sampling rate. pyxdf's
+`effective_srate` is `(n - 1) / duration`, so a single dropout lowers it
+(a 2 s gap in a 10 s, 500 Hz recording gives 400 Hz), which would scale every
+frequency and misplace every event.
+
+Wireless EEG regularly drops samples. The loader detects dropouts as a
+persistent shift of the timestamps against the sample index (it compares the
+lower envelope of the offset over half-second windows, so ordinary jitter and
+chunked timestamps are not mistaken for gaps), inserts the missing samples as
+linear ramps between the neighbouring samples, marks them with a
+`BAD_eeg_missing` annotation and logs a warning. Sample `i` of the Raw object
+is therefore always `i / sfreq` seconds after the first sample.
+
+Markers and `BAD_<label>_missing` annotations are placed by timestamp on this
+sample grid, so they stay on the right samples after a dropout and when the
+EEG device clock drifts against LSL time. A warning is logged when the
+measured rate differs from the nominal one by more than 0.1 %.
 
 ## The `session_t0` anchor
 
 All temporal outputs share a common origin: `session_t0`, the absolute LSL
 timestamp of the first EEG sample kept in the Raw object (sample 0). Auxiliary
-Tier-1 streams are evaluated at the actual EEG sample timestamps.
+Tier-1 streams are evaluated at the EEG sample timestamps (after dropout
+filling).
 
-- Raw object: t = 0 corresponds to `session_t0`
-- Tier-2 timestamps: already relative to `session_t0` (subtract on load)
-- Event timestamps: already relative to `session_t0`
+- Raw object: t = 0 corresponds to `session_t0`; sample `i` is at `i / sfreq`
+- Tier-2 timestamps: LSL seconds relative to `session_t0`
+- Event timestamps: LSL seconds relative to `session_t0`
 
-To convert any Raw time back to absolute LSL time: `t_lsl = t_raw + session_t0`.
+Tier-2 and event timestamps equal Raw times only when the EEG has no dropouts
+and no clock drift. `MultimodalRecording.eeg_timestamps` holds the LSL
+timestamp of every EEG sample at the native rate, so you can map any LSL time
+onto the Raw time axis exactly:
+
+```python
+idx = np.interp(t_lsl, rec.eeg_timestamps, np.arange(len(rec.eeg_timestamps)))
+t_raw = idx / native_sfreq  # native EEG rate, before target_sfreq resampling
+```
 
 This anchor allows cross-referencing with external system logs (GPS, video
 metadata, physiological triggers) that store absolute LSL timestamps.
@@ -257,7 +292,7 @@ loader = XDFLoader(
     special_streams={
         "ecg": {"type": "ECG", "method": "sinc"},  # downsampling 1000->500 Hz
         "gaze": {"type": "Gaze", "method": "pchip"},  # upsampling 200->500 Hz
-        "button_box": {"type": "EXG", "method": "stim"},  # trigger channel
+        "button_box": {"type": "EXG", "method": "stim"},  # regular-rate TTL channel
     },
     # Tier-2: keep audio at native 44.1 kHz for TF analysis
     tier2_streams={
@@ -307,7 +342,9 @@ aligned = align_stream_to_timestamps(
 
 pyxdf's clock offset correction handles step offsets between devices but not
 slow linear drift (a device clock running slightly fast or slow over an hour).
-If you suspect drift, verify alignment by extracting a signal visible in two
+The loader warns when the EEG stream's measured rate deviates from its nominal
+rate by more than 0.1 % and keeps markers on the right EEG samples, but drift
+between *auxiliary* devices is not corrected. If you suspect drift, verify alignment by extracting a signal visible in two
 streams (e.g. heartbeat R-peaks visible in both EEG and ECG) and checking
 whether peak pairs stay aligned over the full recording. A systematic time
 shift growing over the session indicates uncorrected drift and should be
