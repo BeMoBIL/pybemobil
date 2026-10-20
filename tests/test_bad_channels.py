@@ -60,6 +60,22 @@ def test_line_noise_criterion_sees_line_noise(amp):
     assert res["bad_by_line_noise"] == [raw.ch_names[0]]
 
 
+def test_warns_when_many_channels_are_bad():
+    """More than max_bad_fraction bad channels triggers a visible warning."""
+    raw = _smooth_raw(n_ch=16, duration=30.0)
+    data = raw.get_data()
+    data[:5] = 0.0  # 5 of 16 flat channels
+    raw._data = data
+    with pytest.warns(RuntimeWarning, match="flagged .* of 16 EEG channels"):
+        get_bad_chs(raw, notch_lines=None, ransac=False)
+    # the limit is configurable
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        get_bad_chs(raw, notch_lines=None, ransac=False, max_bad_fraction=0.5)
+
+
 def test_nan_data_raises_clear_error():
     """NaN in the data gives a clear error instead of an obscure one."""
     raw = _smooth_raw(n_ch=8, duration=10.0)

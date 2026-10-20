@@ -212,6 +212,7 @@ def get_bad_chs(
     deviation_threshold=3.5,
     ransac=None,
     highpass=1.0,
+    max_bad_fraction=0.2,
 ):
     """Detect bad EEG channels using PyPREP, FASTER and optionally line noise.
 
@@ -268,6 +269,12 @@ def get_bad_chs(
     highpass : float | None
         High-pass cutoff (Hz) applied to the working copy before detection.
         Default ``1.0``, as PyPREP's PREP pipeline does. ``None`` skips it.
+    max_bad_fraction : float | None
+        Warn when more than this fraction of the EEG channels is flagged
+        (default ``0.2``, BeMoBIL's ``num_chan_rej_max_target = 1/5``). Many
+        bad channels usually mean a recording problem or too strict
+        criteria, and interpolating them leaves little independent data for
+        ICA. ``None`` disables the warning.
 
     Returns
     -------
@@ -394,6 +401,19 @@ def get_bad_chs(
             bad_chs.update(bad_chs_list)
     bad_chs.update(bad_by_manual)
     bad_chs.update(bad_by_line_noise)
+
+    n_eeg = len(eeg_idx)
+    fraction_bad = len(bad_chs) / n_eeg if n_eeg else 0.0
+    if max_bad_fraction is not None and fraction_bad > max_bad_fraction:
+        warnings.warn(
+            f"get_bad_chs flagged {len(bad_chs)} of {n_eeg} EEG channels "
+            f"({fraction_bad:.0%}), more than max_bad_fraction="
+            f"{max_bad_fraction:.0%}. Check the recording, or relax the criteria "
+            "(e.g. deviation_threshold, ransac=False); interpolating this many "
+            "channels leaves little independent data for ICA.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     bad_ch_dict = {
         "all_bads": sorted(bad_chs),
@@ -1035,6 +1055,8 @@ class EEGPreprocessor:
             raw,
             name="bad_channel_detection",
             all_bads=bad_ch_dict["all_bads"],
+            n_eeg=len(eeg_chs),
+            fraction_bad=round(len(bad_ch_dict["all_bads"]) / len(eeg_chs), 4),
         )
         timer.log_step("bad_channel_detection", time.perf_counter() - t0)
 
