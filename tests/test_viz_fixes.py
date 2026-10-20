@@ -105,13 +105,6 @@ def test_tfr_on_ica_sources_without_picks(raw_abc, epochs_abc):
     plt.close("all")
 
 
-def test_plot_ersp_emits_future_warning(epochs_abc):
-    """plot_ERSP is deprecated with a real FutureWarning."""
-    with pytest.warns(FutureWarning, match="plot_TFR"):
-        plotting.plot_ERSP({"a": epochs_abc["a"]}, freqs=np.arange(4, 12.0))
-    plt.close("all")
-
-
 def test_ci_function_fallback(monkeypatch):
     """Without MNE's private helper a parametric band is used."""
     import sys

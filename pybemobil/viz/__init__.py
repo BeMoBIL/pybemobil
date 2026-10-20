@@ -3,7 +3,6 @@
 from pybemobil.viz.plotting import (
     glue_imgs,
     plot_ERP,
-    plot_ERSP,
     plot_butterfly,
     plot_evoked_data,
     plot_joint,
@@ -18,7 +17,6 @@ from pybemobil.viz.plotting import (
 __all__ = [
     "glue_imgs",
     "plot_ERP",
-    "plot_ERSP",
     "plot_butterfly",
     "plot_evoked_data",
     "plot_joint",

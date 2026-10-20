@@ -5,7 +5,6 @@
 import logging
 import numbers
 import textwrap
-import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -832,55 +831,6 @@ def plot_tfr_topomaps(
     plt.subplots_adjust(wspace=0.6, hspace=0.4)
 
     return figs
-
-
-def plot_ERSP(
-    inst_dict,
-    *,
-    freqs=np.arange(1, 41),
-    tmin=-0.5,
-    tmax=1,
-    baseline=None,
-    picks=None,
-    combine=None,
-    is_sources=False,
-    tfr_kwargs=None,
-    plot_kwargs=None,
-):
-    """Plot time-frequency representations (deprecated, use :func:`plot_TFR`).
-
-    .. deprecated::
-        ``plot_ERSP`` will be removed in a future version. It takes the same
-        parameters as :func:`plot_TFR` and passes them on unchanged.
-
-    Parameters
-    ----------
-    inst_dict : dict
-        See :func:`plot_TFR`; all other parameters are passed on unchanged.
-
-    Returns
-    -------
-    fig_dict : dict
-        See :func:`plot_TFR`.
-    """
-    warnings.warn(
-        "plot_ERSP is deprecated and will be removed in a future version; "
-        "use plot_TFR instead.",
-        FutureWarning,
-        stacklevel=2,
-    )
-    return plot_TFR(
-        inst_dict,
-        freqs=freqs,
-        tmin=tmin,
-        tmax=tmax,
-        baseline=baseline,
-        picks=picks,
-        combine=combine,
-        is_sources=is_sources,
-        tfr_kwargs=tfr_kwargs,
-        plot_kwargs=plot_kwargs,
-    )
 
 
 # %% Time domain functions
