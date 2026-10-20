@@ -53,3 +53,27 @@ def test_various_erps_subtraction_group_mode(raw_abc):
     )
     assert fig is not None
     plt.close("all")
+
+
+@pytest.fixture
+def epochs_abc(raw_abc):
+    """Epochs of the a/b/c events."""
+    events, event_id = mne.events_from_annotations(raw_abc, verbose=False)
+    return mne.Epochs(
+        raw_abc, events, event_id, tmin=-0.2, tmax=0.8, preload=True, verbose=False
+    )
+
+
+def test_psd_ci_spans_epochs_for_one_object(epochs_abc):
+    """With a single Epochs object the CI is computed across its epochs."""
+    psd = plotting._prepare_psd({"a": epochs_abc["a"]}, fmin=1, fmax=30, picks=["Cz"])
+    assert psd["a"]["all"].shape[0] == len(epochs_abc["a"])
+    assert np.all(psd["a"]["all"].std(axis=0) > 0)  # a band of non-zero width
+
+
+def test_psd_accepts_spectrum_baseline(epochs_abc):
+    """Spectrum baselines (as documented) are accepted."""
+    spec = epochs_abc["b"].compute_psd(fmin=1, fmax=30, verbose=False)
+    fig = plotting.plot_PSD({"a": epochs_abc["a"]}, 1, 30, baseline_dict={"a": spec})
+    assert fig is not None
+    plt.close("all")

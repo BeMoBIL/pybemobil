@@ -20,6 +20,8 @@ from PIL import Image
 
 LOGGER = logging.getLogger(__name__)
 
+_SPECTRUM_TYPES = (mne.time_frequency.Spectrum, mne.time_frequency.EpochsSpectrum)
+
 
 # %% General viz functions
 
@@ -1544,6 +1546,8 @@ def _check_input_type(inst_dict, domain):
                     | mne.time_frequency.tfr.AverageTFR,
                 ):
                     LOGGER.info("Working with TFRs.")
+            elif isinstance(entries, _SPECTRUM_TYPES):
+                out_dict[key] = [entries]
             elif isinstance(entries, mne.BaseEpochs):
                 LOGGER.info("Working with epochs in frequency domain")
                 out_dict[key] = [entries]
@@ -1610,33 +1614,37 @@ def _prepare_psd(
         default_kwargs.update(kwargs)
     kwargs = default_kwargs
 
+    def _as_spectrum(entry):
+        # Spectra (e.g. a baseline computed elsewhere) are used as given
+        if isinstance(entry, _SPECTRUM_TYPES):
+            return entry.copy().pick("data" if picks is None else picks, exclude="bads")
+        return entry.compute_psd(fmin=fmin, fmax=fmax, picks=picks, **kwargs)
+
     for key, entries in inst_dict.items():
-        if isinstance(entries, mne.BaseEpochs | mne.Evoked):
-            psds = [entries.compute_psd(fmin=fmin, fmax=fmax, picks=picks, **kwargs)]
-            psd_dict[key] = psds
+        entries = entries if isinstance(entries, list) else [entries]
+        psd_dict[key] = [_as_spectrum(entry) for entry in entries]
 
-        elif isinstance(entries, list):
-            psds = []
-            for entry in entries:
-                psds.append(
-                    entry.compute_psd(fmin=fmin, fmax=fmax, picks=picks, **kwargs)
-                )
-            psd_dict[key] = psds
-
-    freqs = psds[0].freqs
-    units = psds[0].units()
+    spectra = next(iter(psd_dict.values()))
+    units = spectra[0].units()
     unit = units.get("eeg", next(iter(units.values())))
-    ch_names = psds[0].ch_names
+    ch_names = spectra[0].ch_names
 
     for event, psds in psd_dict.items():
         all_psds = []
         for psd in psds:
-            data = psd.get_data()  # (n_epochs, n_channels, n_freqs) or (n_ch, n_f)
-            if data.ndim == 3:  # Epochs: average over epochs; Evoked has none
-                data = data.mean(axis=0)
+            # (n_epochs, n_channels, n_freqs) or (n_channels, n_freqs)
+            data, freqs = psd.get_data(fmin=fmin, fmax=fmax, return_freqs=True)
             all_psds.append(data)
 
-        all_psds = np.stack(all_psds, axis=0)  # shape: (n_subs, n_channels, n_freqs)
+        if len(all_psds) == 1 and all_psds[0].ndim == 3:
+            # One Epochs object: the epochs are the observations, so the
+            # confidence band reflects the variability across epochs.
+            all_psds = all_psds[0]
+        else:
+            # Several objects (e.g. subjects): average each over its epochs
+            all_psds = np.stack(
+                [d.mean(axis=0) if d.ndim == 3 else d for d in all_psds], axis=0
+            )
         mean_psd = all_psds.mean(axis=0)  # (n_channels, n_freqs)
         psd_dict[event] = dict(
             mean=mean_psd, all=all_psds, freqs=freqs, unit=unit, ch_names=ch_names
