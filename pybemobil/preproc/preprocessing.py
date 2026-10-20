@@ -588,7 +588,9 @@ class EEGPreprocessor:
         If ``True``, components whose dipole falls outside the head model
         (position norm > 0.13 m) are set to ``None`` in the output lists.
     rng_seed : int | None
-        Random seed for ICA and PyPREP.
+        Random seed for ICA and PyPREP (RANSAC). ``None`` draws a fresh seed
+        for each run; the seed actually used is recorded in the provenance
+        descriptor, so any run can be reproduced.
     event_id : dict | None
         Event map recorded in provenance metadata (no effect on processing).
     skip_if_exists : bool
@@ -878,6 +880,14 @@ class EEGPreprocessor:
         filenames = [str(p) for p in getattr(raw, "filenames", []) if p]
         src = filenames[0] if len(filenames) == 1 else (filenames or None)
         set_descriptor(raw, init_descriptor(src, pipeline="EEGPreprocessor.run_raw"))
+        # A fixed seed for this run, recorded so the run can be reproduced
+        # even when the user did not set one.
+        seed = (
+            int(self.rng_seed)
+            if self.rng_seed is not None
+            else int(np.random.SeedSequence().entropy % (2**32))
+        )
+        append_desc(raw, name="settings", rng_seed=seed)
 
         # --- Channel renaming ---
         if self.rename_channels is not None:
@@ -941,8 +951,11 @@ class EEGPreprocessor:
         # --- Bad channel detection ---
         t0 = time.perf_counter()
         _bad_ch_kw = dict(self.get_bad_chs_kwargs)
-        _pyprep_kw = _bad_ch_kw.pop("pyprep_kwargs", {})
-        _pyprep_kw["random_state"] = self.rng_seed
+        # Copy: the caller's pyprep_kwargs dict must not be modified.
+        _pyprep_kw = {
+            **(_bad_ch_kw.pop("pyprep_kwargs", None) or {}),
+            "random_state": seed,
+        }
         _notch_lines = _expand_line_noise_freq(self.line_noise_freq, raw.info["sfreq"])
         bad_ch_dict = get_bad_chs(
             raw,
@@ -1030,7 +1043,7 @@ class EEGPreprocessor:
                 filter_bands_ica=self.filter_bands_ica,
                 downsample_ica=self.downsample_ica,
                 thresh=self.thresh,
-                rng_seed=self.rng_seed,
+                rng_seed=seed,
                 exclude_labels=self.exclude_labels,
                 include_labels=self.include_labels,
                 ica_method=self.ica_method,
@@ -1054,7 +1067,7 @@ class EEGPreprocessor:
             )
             ica = mne.preprocessing.ICA(
                 n_components=None,
-                random_state=self.rng_seed,
+                random_state=seed,
                 method="picard",
                 fit_params={"ortho": False, "extended": True},
             )  # stub - never fitted

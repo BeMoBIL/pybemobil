@@ -103,3 +103,27 @@ def test_run_raw_records_actual_ica_method():
     assert steps["ica"]["requested_method"] == "picard"
     assert steps["ica"]["rng_seed"] == 7
     assert "fit_params" in steps["ica"]
+
+
+def test_run_raw_records_drawn_seed_and_keeps_kwargs():
+    """Without rng_seed a seed is drawn and recorded; caller kwargs untouched."""
+    from pybemobil.preproc.utils import get_descriptor
+
+    pyprep_kwargs = {"matlab_strict": False}
+    proc = EEGPreprocessor(
+        loader=None,
+        line_noise_method=None,
+        ica_method="picard",
+        make_report=False,
+        get_bad_chs_kwargs={"pyprep_kwargs": pyprep_kwargs, "ransac": False},
+    )
+    raw_out, _, _ = proc.run_raw(_mixed_raw(), fname_out=None)
+    assert pyprep_kwargs == {"matlab_strict": False}
+
+    steps = {s["name"]: s for s in get_descriptor(raw_out)["steps"]}
+    seed = steps["settings"]["rng_seed"]
+    assert isinstance(seed, int)
+    assert steps["ica"]["method"] == "picard"
+    assert steps["ica"]["requested_method"] == "picard"
+    assert steps["ica"]["rng_seed"] == seed
+    assert "fit_params" in steps["ica"]
