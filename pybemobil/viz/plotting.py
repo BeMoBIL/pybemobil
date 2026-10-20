@@ -1102,7 +1102,9 @@ def plot_various_ERPs(
     # initialize variables (work on copies: event_id is edited below)
     event_id = dict(event_id)
     epochs = []
-    event_list = list(event_id.keys())
+    # Events to plot: the subtraction event itself is only used to correct
+    # the targets and is not plotted.
+    event_list = [e for e in event_id if e != subtraction_event]
     evokeds_dict = {event: [] for event in event_list}
 
     # iterate over raw(s)
@@ -1142,10 +1144,6 @@ def plot_various_ERPs(
                 epochs = _get_substracted_epochs(
                     epochs, subtraction_event, subtraction_targets, event_list
                 )
-                # remove the subtraction event from the list and from event_id
-                if subtraction_event in event_list:
-                    event_list.remove(subtraction_event)
-                    del event_id[subtraction_event]
 
             # No wave difference calculation
             else:
@@ -1789,7 +1787,8 @@ def _get_substracted_epochs(epochs, subtraction_event, subtraction_targets, even
     Returns
     -------
     subtracted_epochs : mne.Epochs
-        The epochs object containing the subtracted data
+        The epochs of every event in *event_list*: the targets with the
+        subtraction event's ERP subtracted, the other events unchanged.
     """
     epoch_list = []
 
@@ -1814,8 +1813,10 @@ def _get_substracted_epochs(epochs, subtraction_event, subtraction_targets, even
                 )
             )
             done_something = True
+        elif event != subtraction_event:
+            epoch_list.append(epochs[event])
 
-    # Concatenate the epochs of the two classes
+    # Concatenate the epochs of all plotted events
     subtracted_epochs = mne.concatenate_epochs(
         epoch_list,
         add_offset=False,
