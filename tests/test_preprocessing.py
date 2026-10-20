@@ -181,6 +181,7 @@ def test_get_derivative_paths_bids_names(tmp_path, name, ext):
         "dipoles": tmp_path / f"{base}_dipoles",
         "trans": tmp_path / f"{base}_trans.fif",
         "report": tmp_path / f"{base}_report.html",
+        "figures": tmp_path / f"{base}_figures",
     }
 
 

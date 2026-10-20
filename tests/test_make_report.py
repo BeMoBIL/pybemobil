@@ -77,11 +77,14 @@ def test_make_report_runs(rng, event_id):
 
 
 def test_joint_plot_file_names_are_portable(tmp_path):
-    """Joint-plot PNGs get BIDS-style, Windows-safe names."""
-    from pybemobil.preproc.make_report import _derivative_base, _safe_label
+    """Joint-plot PNGs get Windows-safe names in the run's figures folder."""
+    from pybemobil.preproc.make_report import _safe_label
+    from pybemobil.preproc.preprocessing import get_derivative_paths
 
     assert _safe_label("trialStart;condition:A/stimulus:x") == (
         "trialStart-condition-A-stimulus-x"
     )
     fname_out = tmp_path / "sub-01_task-walk_eeg.fif.gz"
-    assert _derivative_base(fname_out) == "sub-01_task-walk"
+    assert get_derivative_paths(fname_out)["figures"].name == (
+        "sub-01_task-walk_figures"
+    )
