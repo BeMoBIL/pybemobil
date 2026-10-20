@@ -393,6 +393,12 @@ def build_sys_info(source_data=None):
 def auto_coreg_fsaverage(info, subjects_dir, fit_icp_kwargs=None):
     """Automatically coregister head to fsaverage MRI and return the transform.
 
+    The fit is rigid (rotation and translation, no scaling): the returned
+    transform is used with fsaverage's *unscaled* head model in
+    :func:`fit_dipoles_on_ica`, and a scale estimated by the coregistration
+    is not part of the transform, so it would leave the head and the model
+    misaligned.
+
     Parameters
     ----------
     info : mne.Info
@@ -411,7 +417,7 @@ def auto_coreg_fsaverage(info, subjects_dir, fit_icp_kwargs=None):
     fiducials = "estimated"
     subject = "fsaverage"
     coreg = mne.coreg.Coregistration(info, subject, subjects_dir, fiducials=fiducials)
-    coreg.set_scale_mode("uniform")
+    coreg.set_scale_mode(None)
     coreg.fit_fiducials(verbose=True)
 
     if fit_icp_kwargs is None:
@@ -446,17 +452,15 @@ def _handle_trans(trans, info=None):
     -------
     mne.transforms.Transform
     """
-    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
-    fpath_fsaverage_trans = fs_dir / "bem" / "fsaverage-trans.fif"
+    if isinstance(trans, mne.transforms.Transform):
+        return trans  # no fsaverage download needed
+    if trans is not None and trans not in ("fsaverage", "fit"):
+        raise TypeError(f"Invalid trans: {trans!r}")
 
-    if trans is None or (isinstance(trans, str) and trans == "fsaverage"):
-        return mne.transforms.read_trans(fpath_fsaverage_trans)
-    elif isinstance(trans, str) and trans == "fit":
+    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+    if trans == "fit":
         return auto_coreg_fsaverage(info, fs_dir.parent)
-    else:
-        if not isinstance(trans, mne.transforms.Transform):
-            raise TypeError(f"Invalid trans: {trans!r}")
-        return trans
+    return mne.transforms.read_trans(fs_dir / "bem" / "fsaverage-trans.fif")
 
 
 #: AMICA likelihood-based sample rejection used by default with jamica. Matches
@@ -722,6 +726,29 @@ def compute_ica(
     return ica, ic_labels
 
 
+def _warn_if_no_fiducials(info):
+    """Warn when electrode positions have no fiducials (unknown head frame).
+
+    Without nasion and preauricular points MNE assumes the positions are
+    already in head coordinates, so the fsaverage head model may not fit
+    the electrodes and dipole locations are shifted.
+    """
+    import warnings as _warnings
+
+    dig = info.get("dig") or []
+    has_fids = any(d["kind"] == mne.io.constants.FIFF.FIFFV_POINT_CARDINAL for d in dig)
+    if not has_fids:
+        _warnings.warn(
+            "The electrode positions have no fiducials, so MNE assumes they are "
+            "already in fsaverage head coordinates. Dipole locations can be "
+            "shifted if they are not (e.g. the bundled standard_MoBI_128 "
+            "montage). Use a montage with fiducials (e.g. digitised positions) "
+            "or check the alignment with mne.viz.plot_alignment.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+
+
 def fit_dipoles_on_ica(
     ica,
     info,
@@ -783,6 +810,7 @@ def fit_dipoles_on_ica(
         )
     if n_dipoles != 1:
         raise ValueError(f"n_dipoles must be 1 or 2, got {n_dipoles}")
+    _warn_if_no_fiducials(info)
 
     fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
     bem = str(fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif")
