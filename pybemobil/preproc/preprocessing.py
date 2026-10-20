@@ -350,6 +350,31 @@ def get_bad_chs(
 # %% Classes
 
 
+def _interpolate_and_rereference(raw):
+    """Interpolate bad non-EOG channels, then average-reference all EEG.
+
+    Final stage of ``run_raw`` and ``reapply_ica``, in place. As in BeMoBIL's
+    ``bemobil_interp_avref``, the reference includes the interpolated channels.
+    """
+    # Apply the good-channel average reference carried since the bandpass.
+    if not any(p["desc"] == "Average EEG reference" for p in raw.info["projs"]):
+        raw.set_eeg_reference(projection=True)
+    raw.apply_proj()
+    eog = [raw.ch_names[i] for i in mne.pick_types(raw.info, eog=True, exclude=[])]
+    bads = [b for b in raw.info["bads"] if b not in eog]
+    raw.info["bads"] = bads
+    raw.interpolate_bads(reset_bads=True, method="spline")
+    append_desc(
+        raw,
+        name="interpolate_bads",
+        method="spline",
+        interpolated=bads,
+        eog_excluded=eog,
+    )
+    raw.set_eeg_reference(ref_channels="average", projection=False)
+    append_desc(raw, name="avg_ref", channels="all EEG (after interpolation)")
+
+
 def _try_report(make_report_func, **kwargs):
     """Build the report; turn a failure into a warning and return ``None``."""
     try:
@@ -1115,38 +1140,10 @@ class EEGPreprocessor:
             raw_clean = ica.apply(raw_pre_ica.copy())
         else:
             raw_clean = raw_pre_ica.copy()
-        # Bake in the average EEG reference here, at the very end of the
-        # pipeline. Up to this point the reference has only ever existed as
-        # an unapplied SSP projection (added with projection=True in the
-        # bandpass stage and inherited via .copy()/ICA through
-        # raw_pre_ica -> raw_clean). It is only actually applied to the data
-        # now, once, via apply_proj(). raw_pre_ica keeps it unapplied so
-        # reapply_ica() can repeat this stage. The `set_eeg_reference` call
-        # is only a defensive fallback in case raw_clean somehow doesn't
-        # already carry the projection.
-        if not any(
-            p["desc"] == "Average EEG reference" for p in raw_clean.info["projs"]
-        ):
-            raw_clean.set_eeg_reference(ref_channels="average", projection=True)
-        raw_clean.apply_proj()
-        append_desc(raw_clean, name="avg_ref")
-        # Exclude EOG-typed channels from interpolation (they are not on the
-        # scalp and spherical interpolation is not meaningful for them)
-        eog_chs = [
-            ch
-            for ch, d in zip(raw_clean.ch_names, raw_clean.info["chs"])
-            if d["kind"] == mne.io.constants.FIFF.FIFFV_EOG_CH
-        ]
-        bads_to_interp = [b for b in raw_clean.info["bads"] if b not in eog_chs]
-        raw_clean.info["bads"] = bads_to_interp
-        raw_clean.interpolate_bads(reset_bads=True, method="spline")
-        append_desc(
-            raw_clean,
-            name="interpolate_bads",
-            method="spline",
-            interpolated=bads_to_interp,
-            eog_excluded=eog_chs,
-        )
+        # Up to this point the average reference has only existed as an
+        # unapplied SSP projection; raw_pre_ica keeps it unapplied so
+        # reapply_ica() can repeat this stage.
+        _interpolate_and_rereference(raw_clean)
 
         timer.log_step("rereference_interpolate", time.perf_counter() - t0)
 
@@ -1520,29 +1517,8 @@ class EEGPreprocessor:
         raw_pre_ica = metadata["raw_pre_ica"].load_data()
         raw_clean = ica.apply(raw_pre_ica.copy())
 
-        # Same final stage as run_raw: bake in the avg-ref projection,
-        # then interpolate bad (non-EOG) channels.
-        if not any(
-            p["desc"] == "Average EEG reference" for p in raw_clean.info["projs"]
-        ):
-            raw_clean.set_eeg_reference(ref_channels="average", projection=True)
-        raw_clean.apply_proj()
-        append_desc(raw_clean, name="avg_ref")
-        eog_chs = [
-            ch
-            for ch, d in zip(raw_clean.ch_names, raw_clean.info["chs"])
-            if d["kind"] == mne.io.constants.FIFF.FIFFV_EOG_CH
-        ]
-        bads_to_interp = [b for b in raw_clean.info["bads"] if b not in eog_chs]
-        raw_clean.info["bads"] = bads_to_interp
-        raw_clean.interpolate_bads(reset_bads=True, method="spline")
-        append_desc(
-            raw_clean,
-            name="interpolate_bads",
-            method="spline",
-            interpolated=bads_to_interp,
-            eog_excluded=eog_chs,
-        )
+        # Same final stage as run_raw.
+        _interpolate_and_rereference(raw_clean)
         append_desc(
             raw_clean,
             name="manual_ic_rejection",
