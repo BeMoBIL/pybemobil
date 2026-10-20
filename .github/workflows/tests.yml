@@ -19,13 +19,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Ruff
+        # Same version as in .pre-commit-config.yaml
         run: |
-          pip install ruff
+          pip install ruff==0.17.1
           ruff check .
           ruff format --check .
 
   test:
-    # Oldest and newest supported Python on Linux, plus Windows
+    # Oldest and newest supported Python on Linux, plus Windows and macOS
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -36,6 +37,8 @@ jobs:
           - os: ubuntu-latest
             python-version: "3.13"
           - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
             python-version: "3.13"
     steps:
       - uses: actions/checkout@v4

@@ -10,7 +10,24 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    # Never publish a build whose tests fail
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package and test dependencies
+        run: |
+          pip install -e ".[test]"
+      - name: Run test suite
+        run: |
+          pytest
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
