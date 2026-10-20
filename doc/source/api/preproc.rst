@@ -15,8 +15,8 @@ EEG pipeline
 
 :class:`~pybemobil.preproc.EEGPreprocessor` orchestrates the full pipeline:
 ZapLine → bad-channel detection → bandpass filter → ASR → ICA/JAMICA →
-ICLabel classification → dipole fitting → average re-reference → bad-channel
-interpolation.  All steps are recorded in a provenance descriptor stored on
+ICLabel classification → dipole fitting → bad-channel interpolation →
+average re-reference.  All steps are recorded in a provenance descriptor stored on
 the :class:`mne.io.Raw` object.
 
 .. currentmodule:: pybemobil.preproc
@@ -101,7 +101,7 @@ Epoching
 --------
 
 Helpers for converting continuous preprocessed data into epochs, including
-stimulus-label renaming utilities for common BPN paradigms.
+stimulus-label renaming utilities.
 
 .. autosummary::
    :toctree: generated/
@@ -114,9 +114,11 @@ stimulus-label renaming utilities for common BPN paradigms.
 Motion capture
 --------------
 
-Rigid-body kinematics from XDF motion streams.  Works on the motion data
-returned by :class:`~pybemobil.io.XDFLoader` in
-:attr:`~pybemobil.io.MultimodalRecording.motion`.
+Rigid-body kinematics from motion capture channels in a Raw object, e.g.
+motion streams that :class:`~pybemobil.io.XDFLoader` merged into
+``MultimodalRecording.raw`` as special streams. Channel names follow the
+``<body>_quat_[xyzw]``, ``<body>_eul_[xyz]`` and ``<body>_pos_[xyz]``
+convention.
 
 .. autosummary::
    :toctree: generated/

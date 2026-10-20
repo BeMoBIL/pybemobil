@@ -134,9 +134,9 @@ def init_descriptor(source=None, pipeline=""):
         ``versions``, and an empty ``steps`` list.
     """
     try:
-        bpn_ver = version("pybemobil")
+        pkg_ver = version("pybemobil")
     except PackageNotFoundError:
-        bpn_ver = "unknown"
+        pkg_ver = "unknown"
 
     try:
         mne_ver = version("mne")
@@ -154,7 +154,7 @@ def init_descriptor(source=None, pipeline=""):
         "pipeline": pipeline,
         "input": src,
         "timestamp": datetime.datetime.now().isoformat(),
-        "versions": {"pybemobil": bpn_ver, "mne": mne_ver},
+        "versions": {"pybemobil": pkg_ver, "mne": mne_ver},
         "steps": [],
     }
 
@@ -393,6 +393,12 @@ def build_sys_info(source_data=None):
 def auto_coreg_fsaverage(info, subjects_dir, fit_icp_kwargs=None):
     """Automatically coregister head to fsaverage MRI and return the transform.
 
+    The fit is rigid (rotation and translation, no scaling): the returned
+    transform is used with fsaverage's *unscaled* head model in
+    :func:`fit_dipoles_on_ica`, and a scale estimated by the coregistration
+    is not part of the transform, so it would leave the head and the model
+    misaligned.
+
     Parameters
     ----------
     info : mne.Info
@@ -411,7 +417,7 @@ def auto_coreg_fsaverage(info, subjects_dir, fit_icp_kwargs=None):
     fiducials = "estimated"
     subject = "fsaverage"
     coreg = mne.coreg.Coregistration(info, subject, subjects_dir, fiducials=fiducials)
-    coreg.set_scale_mode("uniform")
+    coreg.set_scale_mode(None)
     coreg.fit_fiducials(verbose=True)
 
     if fit_icp_kwargs is None:
@@ -446,17 +452,15 @@ def _handle_trans(trans, info=None):
     -------
     mne.transforms.Transform
     """
-    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
-    fpath_fsaverage_trans = fs_dir / "bem" / "fsaverage-trans.fif"
+    if isinstance(trans, mne.transforms.Transform):
+        return trans  # no fsaverage download needed
+    if trans is not None and trans not in ("fsaverage", "fit"):
+        raise TypeError(f"Invalid trans: {trans!r}")
 
-    if trans is None or (isinstance(trans, str) and trans == "fsaverage"):
-        return mne.transforms.read_trans(fpath_fsaverage_trans)
-    elif isinstance(trans, str) and trans == "fit":
+    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+    if trans == "fit":
         return auto_coreg_fsaverage(info, fs_dir.parent)
-    else:
-        if not isinstance(trans, mne.transforms.Transform):
-            raise TypeError(f"Invalid trans: {trans!r}")
-        return trans
+    return mne.transforms.read_trans(fs_dir / "bem" / "fsaverage-trans.fif")
 
 
 #: AMICA likelihood-based sample rejection used by default with jamica. Matches
@@ -520,8 +524,8 @@ def compute_ica(
     filter_bands_ica : tuple of float
         ``(l_freq, h_freq)`` for the ICA-specific bandpass filter. The
         default ``(1.75, 100.0)`` uses BeMoBIL's 1.75 Hz AMICA high-pass and
-        the 100 Hz low-pass ICLabel expects. (:class:`EEGPreprocessor` uses
-        ``(1.75, None)`` because its data is already low-passed at 100 Hz.)
+        the 100 Hz low-pass ICLabel expects. :class:`EEGPreprocessor` uses
+        ``(1.75, None)`` because its data is already low-passed at 100 Hz.
     downsample_ica : float
         Target sampling rate for ICA fitting (anti-aliasing applied
         automatically).  Skipped when the recording is already at or below this
@@ -569,6 +573,9 @@ def compute_ica(
         merged over it key by key. Pass
         ``{"fit_params": {"do_reject": False}}`` to disable rejection.
         Ignored when a non-jamica method is used.
+    reject_by_annotation : bool
+        If ``True`` (default), 1 s epochs that overlap ``BAD_*`` annotations
+        are left out of the ICA fit and of ICLabel.
 
     Returns
     -------
@@ -625,6 +632,7 @@ def compute_ica(
     epochs = mne.make_fixed_length_epochs(
         raw_ica, duration=1.0, preload=True, reject_by_annotation=reject_by_annotation
     )
+    del raw_ica  # everything below works on the epochs
     # Apply the average-reference projection so that ICLabel sees a properly
     # CAR-referenced dataset (otherwise it emits a warning and may classify
     # components less accurately).
@@ -658,7 +666,8 @@ def compute_ica(
         # compute_rank's default picks, causing a mismatch unrelated to the
         # average reference.
         picks_eeg = mne.pick_types(epochs.info, eeg=True, exclude="bads")
-        rank_dict = mne.compute_rank(epochs.copy().pick(picks_eeg), tol="auto")
+        # epochs hold EEG only, and compute_rank excludes bads like picks_eeg
+        rank_dict = mne.compute_rank(epochs, tol="auto")
         n_components = sum(rank_dict.values())
 
         _jamica_kw = _resolve_jamica_kwargs(jamica_kwargs)
@@ -722,6 +731,29 @@ def compute_ica(
     return ica, ic_labels
 
 
+def _warn_if_no_fiducials(info):
+    """Warn when electrode positions have no fiducials (unknown head frame).
+
+    Without nasion and preauricular points MNE assumes the positions are
+    already in head coordinates, so the fsaverage head model may not fit
+    the electrodes and dipole locations are shifted.
+    """
+    import warnings as _warnings
+
+    dig = info.get("dig") or []
+    has_fids = any(d["kind"] == mne.io.constants.FIFF.FIFFV_POINT_CARDINAL for d in dig)
+    if not has_fids:
+        _warnings.warn(
+            "The electrode positions have no fiducials, so MNE assumes they are "
+            "already in fsaverage head coordinates. Dipole locations can be "
+            "shifted if they are not (e.g. the bundled standard_MoBI_128 "
+            "montage). Use a montage with fiducials (e.g. digitised positions) "
+            "or check the alignment with mne.viz.plot_alignment.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+
+
 def fit_dipoles_on_ica(
     ica,
     info,
@@ -783,6 +815,7 @@ def fit_dipoles_on_ica(
         )
     if n_dipoles != 1:
         raise ValueError(f"n_dipoles must be 1 or 2, got {n_dipoles}")
+    _warn_if_no_fiducials(info)
 
     fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
     bem = str(fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif")
@@ -948,9 +981,8 @@ def remove_line(
 ):
     """Remove spectral line noise from EEG using ZapLine (DSS-based).
 
-    Operates on EEG channels only; all other channel types are left untouched
-    (except for the ``"adaptive"`` and ``"zapline"`` methods, which operate
-    on the full raw object via :class:`mne_denoise.zapline.ZapLine`).
+    Operates on EEG channels only; all other channel types are left
+    untouched, for every method.
 
     Parameters
     ----------
