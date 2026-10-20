@@ -670,9 +670,11 @@ def plot_tfr_topomaps(
     Parameters
     ----------
     inst_dict : dict
-        Dictionary of EpochsTFR or TFR objects. grouped by conditionm
+        Dictionary of EpochsTFR or TFR objects, grouped by condition
         such as: ``{"condition": mne.EpochsTFR}`` or ``{"condition": mne.AverageTFR}``.
         If EpochsTFR are passed, they are averaged over epochs.
+    times : list of tuples
+        List of (tmin, tmax) tuples to plot.
     bands : dict
         Dictionary of frequency bands, e.g., {'theta': (4, 8), ...}.
         Frequencies must be included in the TFR object. If None, default bands
@@ -682,8 +684,9 @@ def plot_tfr_topomaps(
         - Alpha (8-12 Hz)
         - Beta (12-30 Hz)
         - Gamma (30-45 Hz)
-    times : list of tuples
-        List of (tmin, tmax) tuples to plot.
+    baseline : tuple | None
+        Baseline interval for a log-ratio baseline correction of the TFRs.
+        ``None`` (default) applies none.
     tfr_kwargs : dict
         Additional keyword arguments for the TFR computation function.
     plot_kwargs : dict
@@ -1207,6 +1210,9 @@ def plot_evoked_data(
         Additional arguments for the time series plot. Default is None.
     topo_kwargs : dict | None
         Additional arguments for the topomap plot. Default is None.
+    times : array-like | None
+        Times (s) of the ``"topo"`` maps, see :func:`plot_topo`. ``None``
+        uses five evenly spaced times.
 
     Returns
     -------

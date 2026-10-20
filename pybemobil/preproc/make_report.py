@@ -759,6 +759,33 @@ def make_report(
         montage, annotations, events, and all ICA plots.
     raw_clean : mne.io.BaseRaw
         The fully processed recording.
+    ica : mne.preprocessing.ICA
+        The ICA of the run; an unfitted ICA (``fit_ica=False``) skips the
+        ICA sections.
+    ic_labels : dict
+        ICLabel output (``"labels"`` and ``"y_pred_proba"``), see
+        :func:`~pybemobil.preproc.utils.compute_ica`.
+    dipoles : list
+        One :class:`mne.Dipole` (or ``None``) per IC, see
+        :func:`~pybemobil.preproc.fit_dipoles_on_ica`; empty if no dipoles
+        were fitted.
+    residuals : list
+        Residual field of each dipole fit, aligned with *dipoles*.
+    trans : mne.transforms.Transform | None
+        Head-to-MRI transform used for the dipole fits.
+    bad_ch_dict : dict
+        Output of :func:`~pybemobil.preproc.get_bad_chs`.
+    fname_out : str | Path | None
+        The pipeline's *fname_out*: used for the report title and to save
+        figures to the ``"figures"`` folder of
+        :func:`~pybemobil.preproc.get_derivative_paths`.
+    event_id : dict | None
+        Event names and codes for the ERP sections; ``None`` skips them.
+    thresh : float
+        ICLabel threshold, shown in the ICLabel section.
+    step_timings : list of dict | None
+        Duration of each pipeline step (``"name"`` and ``"duration_s"``),
+        shown as a table.
     tier2 : dict | None
         Tier-2 streams from :class:`~pybemobil.io.MultimodalRecording`
         (kept at native rate, not merged into ``raw``).  Each stream is
@@ -779,6 +806,11 @@ def make_report(
         so the effect of the full pipeline is visible. If ``None`` (e.g. when
         rebuilding a report from cached outputs and the BIDS raw cannot be
         found), ``raw_pre_ica`` is shown instead.
+
+    Returns
+    -------
+    report : mne.Report
+        The report; save it with :meth:`mne.Report.save`.
     """
     old_log_level = mne.set_log_level("warning", return_old_level=True)
     figs_before = set(plt.get_fignums())
