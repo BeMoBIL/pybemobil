@@ -166,7 +166,8 @@ def test_batch_export_continues_on_error(tmp_path):
         {"raw": None, "subject": "bad"},
         {"raw": raw, "subject": "02"},
     ]
-    results = batch_export_to_bids(runs, bids_root=tmp_path, verbose=False)
+    with pytest.warns(RuntimeWarning, match="BIDS export failed for sub-bad"):
+        results = batch_export_to_bids(runs, bids_root=tmp_path, verbose=False)
     # only the valid run produces a BIDSPath
     assert len(results) == 1
     assert results[0].subject == "02"
