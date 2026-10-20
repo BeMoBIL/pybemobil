@@ -193,6 +193,16 @@ def _find_flat_channels(raw, exclude=(), flat_threshold=1e-15):
     return [raw.ch_names[i] for i, f in zip(picks, flat) if f]
 
 
+def _notch_freqs_below_nyquist(freqs, sfreq, notch_width):
+    """Return the line frequencies a notch filter can handle at *sfreq*.
+
+    MNE needs the upper edge of each notch below Nyquist, so frequencies
+    within ``notch_width`` of Nyquist are dropped as well.
+    """
+    freqs = np.atleast_1d(np.asarray(freqs, dtype=float))
+    return freqs[freqs + notch_width < sfreq / 2]
+
+
 def get_bad_chs(
     raw,
     pyprep_kwargs=None,
@@ -272,6 +282,21 @@ def get_bad_chs(
     """
     raw = raw.copy()
 
+    eeg_idx = mne.pick_types(raw.info, eeg=True, exclude=[])
+    eeg_data = raw.get_data(picks=eeg_idx)
+    nonfinite = [
+        raw.ch_names[i]
+        for i, row in zip(eeg_idx, eeg_data)
+        if not np.isfinite(row).all()
+    ]
+    if nonfinite:
+        raise ValueError(
+            f"get_bad_chs: EEG channels {nonfinite} contain NaN or inf values. "
+            "Fill or interpolate missing data (or drop these channels) before "
+            "bad-channel detection."
+        )
+    del eeg_data
+
     if isinstance(notch_lines, str):
         if notch_lines == "europe":
             notch_lines = np.arange(50, 151, 50)
@@ -309,12 +334,16 @@ def get_bad_chs(
         )
 
     if notch_lines is not None:
-        notch_lines_arr = np.asarray(notch_lines)
-        nyquist = raw.info["sfreq"] / 2
-        notch_lines_arr = notch_lines_arr[
-            : np.searchsorted(notch_lines_arr, nyquist, side="right")
-        ]
-        raw.notch_filter(freqs=notch_lines_arr, notch_widths=notch_width)
+        notch_lines_arr = _notch_freqs_below_nyquist(
+            notch_lines, raw.info["sfreq"], notch_width
+        )
+        if notch_lines_arr.size:
+            raw.notch_filter(freqs=notch_lines_arr, notch_widths=notch_width)
+        else:
+            LOGGER.info(
+                "get_bad_chs: no line frequency below Nyquist "
+                f"({raw.info['sfreq'] / 2:.1f} Hz); notch filter skipped."
+            )
 
     # === PyPREP ====
     # Merge user kwargs into the defaults (without mutating the caller's dict)

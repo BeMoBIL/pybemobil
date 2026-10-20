@@ -4,7 +4,7 @@ import mne
 import numpy as np
 import pytest
 
-from pybemobil.preproc import get_bad_chs
+from pybemobil.preproc import EEGPreprocessor, get_bad_chs
 
 
 def _smooth_raw(n_ch=32, sfreq=250.0, duration=120.0, seed=0):
@@ -58,6 +58,39 @@ def test_line_noise_criterion_sees_line_noise(amp):
     raw._data = data
     res = get_bad_chs(raw, notch_lines="europe", line_noise_crit=3, ransac=False)
     assert res["bad_by_line_noise"] == [raw.ch_names[0]]
+
+
+def test_nan_data_raises_clear_error():
+    """NaN in the data gives a clear error instead of an obscure one."""
+    raw = _smooth_raw(n_ch=8, duration=10.0)
+    data = raw.get_data()
+    data[2, 100:200] = np.nan
+    raw._data = data
+    with pytest.raises(ValueError, match="contain NaN"):
+        get_bad_chs(raw)
+
+
+@pytest.mark.parametrize("sfreq", [100.0, 101.0])
+def test_get_bad_chs_low_sampling_rate(sfreq):
+    """At <= ~106 Hz the 50 Hz notch cannot be built; it is skipped, not fatal."""
+    raw = _smooth_raw(n_ch=16, sfreq=sfreq, duration=30.0)
+    res = get_bad_chs(raw, notch_lines="europe", ransac=False)
+    assert "all_bads" in res
+
+
+def test_pipeline_runs_at_100_hz():
+    """run_raw works for low-rate recordings (the notch list is empty)."""
+    raw = _smooth_raw(n_ch=16, sfreq=100.0, duration=40.0)
+    proc = EEGPreprocessor(
+        loader=None,
+        line_noise_method=None,
+        ica_method="picard",
+        make_report=False,
+        downsample_ica=None,
+        get_bad_chs_kwargs={"ransac": False},
+    )
+    raw_clean, _, metadata = proc.run_raw(raw, fname_out=None)
+    assert raw_clean.info["sfreq"] == 100.0
 
 
 def test_flat_channels_are_detected_before_referencing():
