@@ -99,6 +99,13 @@ def process_rigid_body(
        if quaternion channels are present.  The source quaternion channels are
        dropped and replaced by Euler angle channels.
     2. Unwrap the Euler angles (see *unwrap*).
+       Samples where the rigid body was not tracked are bridged by linear
+       interpolation first: samples where all of its channels are exactly 0
+       (how :class:`~pybemobil.io.XDFLoader` fills dropouts), quaternions
+       with a norm of ~0, and spans annotated ``BAD_<rb>_missing``. Such
+       spans are annotated ``BAD_<rb>_missing`` in the output, so they can be
+       rejected later; without bridging, filtering and differentiation would
+       turn them into huge spurious velocities.
     3. Optionally resample all channels to *sfreq_target*.
     4. Optionally low-pass filter the orientation (and position) signals.
     5. Compute the first derivative (velocity) via finite differences, with an
@@ -155,7 +162,9 @@ def process_rigid_body(
         velocity / acceleration channels appended.
     rb_info : dict
         Per-rigid-body processing summary:
-        ``{rb_name: {"mode": "quat->euler"|"euler", "channels": list[str]}}``.
+        ``{rb_name: {"mode": "quat->euler"|"euler", "channels": list[str],
+        "n_missing": int}}`` where ``n_missing`` is the number of bridged
+        samples (at the input sampling rate).
     """
     if angle_unit not in ("rad", "deg"):
         raise ValueError(f"angle_unit must be 'rad' or 'deg', got {angle_unit!r}.")
@@ -185,6 +194,16 @@ def process_rigid_body(
             LOGGER.warning(f"  {rb}: no orientation channels found, skipping.")
             continue
 
+        missing = _missing_samples(raw_out, rb, (quat_chs or eul_chs) + pos_chs)
+        if quat_chs and len(quat_chs) == len(_QUAT_SUFFIXES):
+            q_norm = np.linalg.norm(raw_out.get_data(picks=quat_chs), axis=0)
+            missing |= q_norm < 1e-10
+        if missing.all():
+            LOGGER.warning(f"  {rb}: no valid samples, skipping.")
+            continue
+        if missing.any():
+            LOGGER.info(f"  {rb}: bridging {int(missing.sum())} missing sample(s).")
+
         if quat_chs:
             if len(quat_chs) != len(_QUAT_SUFFIXES):
                 missing = sorted(
@@ -199,8 +218,9 @@ def process_rigid_body(
             q_norm = np.linalg.norm(q_data, axis=0, keepdims=True)
             q_data = q_data / np.where(q_norm > 1e-10, q_norm, 1.0)
             euler_data = _quat_to_euler_zyx(q_data)  # (3, n_times)
-            if unwrap:
-                euler_data = np.unwrap(euler_data, axis=1)
+            euler_data = _bridge(
+                euler_data, missing, period=2 * np.pi if unwrap else None
+            )
 
             new_ch_names = [f"{rb}_eul_x", f"{rb}_eul_y", f"{rb}_eul_z"]
             euler_raw = mne.io.RawArray(
@@ -226,12 +246,16 @@ def process_rigid_body(
                     "they are probably in degrees. Pass angle_unit='deg' so they "
                     "are unwrapped with a 360° period."
                 )
-            if unwrap:
-                raw_out._data[idx] = np.unwrap(
-                    raw_out._data[idx], axis=1, period=period
-                )
+            raw_out._data[idx] = _bridge(
+                raw_out._data[idx], missing, period=period if unwrap else None
+            )
 
-        rb_channels[rb] = (orient_chs, pos_chs, mode)
+        if pos_chs:
+            pos_idx = [raw_out.ch_names.index(ch) for ch in pos_chs]
+            raw_out._data[pos_idx] = _bridge(raw_out._data[pos_idx], missing)
+        _annotate_missing(raw_out, rb, missing)
+
+        rb_channels[rb] = (orient_chs, pos_chs, mode, int(missing.sum()))
 
     # ------------------------------------------------------------------
     # Optional resampling (after conversion: quaternions must not be
@@ -245,7 +269,7 @@ def process_rigid_body(
     # Pass 2: filtering and derivatives
     # ------------------------------------------------------------------
     rb_info: dict = {}
-    for rb, (orient_chs, pos_chs, mode) in rb_channels.items():
+    for rb, (orient_chs, pos_chs, mode, n_missing) in rb_channels.items():
         if lowpass_orient is not None:
             orient_idx = [raw_out.ch_names.index(ch) for ch in orient_chs]
             raw_out._data[orient_idx] = _lowpass_array(
@@ -290,7 +314,7 @@ def process_rigid_body(
                 raw_out.add_channels([acc_raw], force_update_info=True)
                 appended_chs.extend(acc_names)
 
-        rb_info[rb] = {"mode": mode, "channels": appended_chs}
+        rb_info[rb] = {"mode": mode, "channels": appended_chs, "n_missing": n_missing}
         LOGGER.info(f"  {rb}: processed ({mode}), channels: {appended_chs}")
 
     return raw_out, rb_info
@@ -325,6 +349,64 @@ def split_by_rigid_body(raw, rb_names=None):
 
 
 # %% Private helpers
+
+
+def _missing_samples(raw, rb, chs):
+    """Return a boolean mask of samples where rigid body *rb* is missing."""
+    data = raw.get_data(picks=chs)
+    missing = np.all(data == 0, axis=0) | np.any(~np.isfinite(data), axis=0)
+    ann = raw.annotations
+    sel = ann.description == f"BAD_{rb}_missing"
+    if sel.any():
+        orig = ann.orig_time
+        starts = raw.time_as_index(ann.onset[sel], use_rounding=True, origin=orig)
+        stops = raw.time_as_index(
+            ann.onset[sel] + ann.duration[sel], use_rounding=True, origin=orig
+        )
+        for start, stop in zip(starts, stops):
+            missing[max(start, 0) : max(stop, start + 1)] = True
+    return missing
+
+
+def _bridge(data, missing, period=None):
+    """Unwrap (if *period*) and linearly interpolate rows across *missing*."""
+    data = np.array(data, dtype=float)
+    valid = ~missing
+    if period is not None:
+        data[:, valid] = np.unwrap(data[:, valid], axis=1, period=period)
+    if missing.any():
+        idx = np.arange(data.shape[1])
+        for row in data:
+            row[missing] = np.interp(idx[missing], idx[valid], row[valid])
+    return data
+
+
+def _annotate_missing(raw, rb, missing):
+    """Annotate runs of *missing* as ``BAD_<rb>_missing`` unless already marked."""
+    if not missing.any():
+        return
+    desc = f"BAD_{rb}_missing"
+    sfreq = raw.info["sfreq"]
+    already = np.zeros_like(missing)
+    ann = raw.annotations
+    sel = ann.description == desc
+    if sel.any():
+        orig = ann.orig_time
+        a0 = raw.time_as_index(ann.onset[sel], use_rounding=True, origin=orig)
+        a1 = raw.time_as_index(
+            ann.onset[sel] + ann.duration[sel], use_rounding=True, origin=orig
+        )
+        for start, stop in zip(a0, a1):
+            already[max(start, 0) : max(stop, start + 1)] = True
+    todo = missing & ~already
+    padded = np.concatenate([[False], todo, [False]])
+    starts = np.flatnonzero(np.diff(padded.astype(int)) == 1)
+    stops = np.flatnonzero(np.diff(padded.astype(int)) == -1)
+    # Annotation onsets are relative to orig_time (meas_date) when it is
+    # set, which raw.times is not: shift by first_time in that case.
+    offset = raw.first_time if ann.orig_time is not None else 0.0
+    for start, stop in zip(starts, stops):
+        raw.annotations.append(raw.times[start] + offset, (stop - start) / sfreq, desc)
 
 
 def _quat_to_euler_zyx(q):
