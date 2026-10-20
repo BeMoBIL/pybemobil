@@ -49,13 +49,18 @@ class MultimodalRecording:
         Tier-1 physiological streams (EEG, ECG, EMG, eye-tracking, EDA, ...)
         aligned to a common grid at ``target_sfreq`` and merged into an MNE
         Raw object.  The time axis starts at 0 and corresponds to LSL
-        timestamp ``session_t0``.
+        timestamp ``session_t0``.  The sampling rate is the EEG stream's
+        nominal rate; EEG dropouts are filled with interpolated samples and
+        marked ``BAD_eeg_missing``, and markers are placed by timestamp on
+        this sample grid.
     tier2 : dict[str, tuple[np.ndarray, np.ndarray]]
         Tier-2 streams kept at their native sampling rate, suitable for
         time-frequency analysis or frame-level processing.
         ``{label: (data, timestamps_s)}`` where *data* is
-        ``(n_samples, n_channels)`` and *timestamps_s* are **seconds relative
-        to session_t0**.
+        ``(n_samples, n_channels)`` and *timestamps_s* are **LSL seconds
+        relative to session_t0**.  These equal Raw times only if the EEG has
+        no dropouts and its clock does not drift; use :attr:`eeg_timestamps`
+        to map them exactly (see below).
     events : dict[str, tuple[list[str], np.ndarray]]
         Irregular / event-based streams (``nominal_srate == 0``), e.g.
         fixation events, saccade events, or custom trigger streams.
@@ -64,12 +69,19 @@ class MultimodalRecording:
         Absolute LSL timestamp of t = 0 in the Raw object (and in all Tier-2
         and event timestamp arrays).  Use this to cross-reference with external
         system logs that carry LSL time.
+    eeg_timestamps : np.ndarray | None
+        LSL timestamp of every EEG sample at the native rate, after dropout
+        filling (sample ``i`` is at Raw time ``i / native_sfreq``).  Map an
+        LSL time ``t`` to Raw time with
+        ``np.interp(t, eeg_timestamps, np.arange(len(eeg_timestamps))) /
+        native_sfreq``.
     """
 
     raw: mne.io.BaseRaw
     tier2: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
     events: dict[str, tuple[list[str], np.ndarray]] = field(default_factory=dict)
     session_t0: float = 0.0
+    eeg_timestamps: np.ndarray | None = None
 
 
 # %% XDF-specific helpers (MNE-dependent; stay in this module)
@@ -288,6 +300,106 @@ def _crop_stream(
     return data[mask], ts[mask]
 
 
+def _stream_sfreq(stream: dict) -> float:
+    """Return the sampling rate to use for a regular stream.
+
+    The declared ``nominal_srate`` is used when it is positive. pyxdf's
+    ``effective_srate`` is ``(n - 1) / duration`` and is therefore pulled
+    down by any dropout in the stream, so it is only a fallback.
+    """
+    try:
+        nominal = float(stream["info"]["nominal_srate"][0])
+    except (KeyError, IndexError, TypeError, ValueError):
+        nominal = 0.0
+    if nominal > 0:
+        return nominal
+    effective = float(np.array(stream["info"].get("effective_srate", 0.0)).item())
+    if effective <= 0:
+        effective = _compute_effective_srate(np.asarray(stream["time_stamps"]))
+    return effective
+
+
+def _find_gaps(ts: np.ndarray, sfreq: float) -> list[tuple[int, int]]:
+    """Find dropouts in a regularly sampled stream.
+
+    Returns ``(i, n_missing)`` pairs: ``n_missing`` samples are missing
+    between sample ``i`` and ``i + 1``.
+
+    A gap is a *persistent* shift of the timestamps against the sample
+    index. The offset ``(ts - ts[0]) * sfreq - index`` is compared over
+    half-second windows before and after each suspicious step, using its
+    lower envelope (the window minimum): transmission delays only ever make
+    timestamps late, so the minimum tracks the device clock while jitter
+    and chunked timestamps (several samples sharing one timestamp) only
+    move the values above it.
+    """
+    n = len(ts)
+    if n < 3 or sfreq <= 0:
+        return []
+    offset = (ts - ts[0]) * sfreq - np.arange(n)
+    steps = np.diff(offset)  # 0 for a perfect grid
+    candidates = np.flatnonzero(steps >= 0.75)
+    win = max(int(round(0.5 * sfreq)), 5)
+    gaps: list[tuple[int, int]] = []
+    last = 0
+    for i in candidates:
+        if i < last:
+            continue
+        before = offset[max(last, i + 1 - win) : i + 1]
+        after = offset[i + 1 : i + 1 + win]
+        n_missing = int(round(float(after.min() - before.min())))
+        if n_missing >= 1:
+            gaps.append((int(i), n_missing))
+            last = int(i) + 1
+    return gaps
+
+
+def _fill_gaps(
+    data: np.ndarray, ts: np.ndarray, gaps: list[tuple[int, int]], sfreq: float
+) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int]]]:
+    """Insert the missing samples of *gaps* into *data* and *ts*.
+
+    The inserted samples are linear ramps between the samples on either
+    side, so later filters do not see a step. Returns the filled data and
+    timestamps and the ``(start_index, n_missing)`` of each gap in the
+    filled arrays.
+    """
+    if not gaps:
+        return data, ts, []
+    data_parts, ts_parts, filled = [], [], []
+    prev = 0
+    n_inserted = 0
+    for i, n_missing in gaps:
+        data_parts.append(data[prev : i + 1])
+        ts_parts.append(ts[prev : i + 1])
+        frac = np.arange(1, n_missing + 1) / (n_missing + 1)
+        ramp = data[i] + frac[:, None] * (data[i + 1] - data[i])
+        data_parts.append(ramp)
+        ts_parts.append(ts[i] + np.arange(1, n_missing + 1) / sfreq)
+        filled.append((i + 1 + n_inserted, n_missing))
+        n_inserted += n_missing
+        prev = i + 1
+    data_parts.append(data[prev:])
+    ts_parts.append(ts[prev:])
+    return np.concatenate(data_parts), np.concatenate(ts_parts), filled
+
+
+def _times_on_grid(event_ts: np.ndarray, grid_ts: np.ndarray, sfreq: float):
+    """Map LSL timestamps to Raw times (seconds) on the sample grid.
+
+    Each timestamp is placed by (fractional) sample index on *grid_ts*, so
+    events stay on the right samples even when the device clock drifts
+    against LSL time or samples were inserted for a dropout. Returns the
+    Raw times and a mask of the timestamps that fall inside the recording
+    (within half a sample of the first and last sample).
+    """
+    event_ts = np.asarray(event_ts, dtype=float)
+    half = 0.5 / sfreq
+    inside = (event_ts >= grid_ts[0] - half) & (event_ts <= grid_ts[-1] + half)
+    idx = np.interp(event_ts, grid_ts, np.arange(len(grid_ts), dtype=float))
+    return idx / sfreq, inside
+
+
 # %% Main class
 
 
@@ -417,6 +529,7 @@ class XDFLoader:
         self.dejitter_timestamps = dejitter_timestamps
         self.max_nan_gap_s = max_nan_gap_s
         self.on_mismatch = on_mismatch
+        self._eeg_timestamps: np.ndarray | None = None
 
     def load(self, path: str | Path) -> MultimodalRecording:
         """Load an XDF file and return a :class:`MultimodalRecording`.
@@ -450,6 +563,7 @@ class XDFLoader:
             )
 
         raw, tier2, events, session_t0 = self._build_raw(streams)
+        eeg_timestamps = self._eeg_timestamps
 
         if self.old_reference:
             raw.add_reference_channels(self.old_reference)
@@ -467,6 +581,7 @@ class XDFLoader:
             tier2=tier2,
             events=events,
             session_t0=session_t0,
+            eeg_timestamps=eeg_timestamps,
         )
 
     # ------------------------------------------------------------------
@@ -496,7 +611,7 @@ class XDFLoader:
             )
 
         labels, types, units = _extract_channel_info(eeg_stream)
-        eeg_native_sfreq = float(np.array(eeg_stream["info"]["effective_srate"]).item())
+        eeg_native_sfreq = _stream_sfreq(eeg_stream)
         scale = np.array([_unit_scale(u, ch) for u, ch in zip(units, labels)])
 
         eeg_t_start = float(eeg_stream["time_stamps"][0])
@@ -546,10 +661,42 @@ class XDFLoader:
                 f"of all Tier-1 streams ({start_time:.3f}-{end_time:.3f} s). "
                 "Use on_mismatch='pad' to keep the full EEG range."
             )
+        # Dropouts: insert the missing samples so that sample i is always
+        # i / sfreq after the first sample (see _find_gaps).
+        eeg_data = np.asarray(eeg_data, dtype=float)
+        eeg_gaps = _find_gaps(eeg_ts, eeg_native_sfreq)
+        eeg_data, eeg_ts, eeg_gaps = _fill_gaps(
+            eeg_data, eeg_ts, eeg_gaps, eeg_native_sfreq
+        )
+        if eeg_gaps:
+            n_missing = sum(n for _, n in eeg_gaps)
+            logger.warning(
+                "EEG stream has %d dropout(s) totalling %.3f s; the missing "
+                "samples were interpolated and marked 'BAD_eeg_missing'.",
+                len(eeg_gaps),
+                n_missing / eeg_native_sfreq,
+            )
+        if len(eeg_ts) > 1:
+            measured = (len(eeg_ts) - 1) / (eeg_ts[-1] - eeg_ts[0])
+            if abs(measured / eeg_native_sfreq - 1) > 1e-3:
+                logger.warning(
+                    "EEG stream: measured sampling rate %.3f Hz differs from the "
+                    "nominal %.3f Hz by more than 0.1 %%. Raw uses the nominal "
+                    "rate; markers are placed by timestamp on the sample grid.",
+                    measured,
+                    eeg_native_sfreq,
+                )
         # t = 0 in the Raw object is the first EEG sample that was kept.
         session_t0 = float(eeg_ts[0])
+        self._eeg_timestamps = eeg_ts
         info = mne.create_info(ch_names=labels, sfreq=eeg_native_sfreq, ch_types=types)
         raw = mne.io.RawArray((eeg_data * scale).T, info, verbose=False)
+        for start, n_missing in eeg_gaps:
+            raw.annotations.append(
+                start / eeg_native_sfreq,
+                n_missing / eeg_native_sfreq,
+                "BAD_eeg_missing",
+            )
 
         # -- Align and append Tier-1 auxiliary streams --------------------
         # Auxiliary streams are evaluated at the actual timestamps of the
@@ -581,7 +728,7 @@ class XDFLoader:
             nan_mask = np.isnan(aligned).any(axis=1)
             if nan_mask.any():
                 aligned[nan_mask] = 0.0
-                self._annotate_nan_regions(raw, nan_mask, tgt_ts, label, session_t0)
+                self._annotate_nan_regions(raw, nan_mask, label)
 
             ch_labels, ch_types, _ = _extract_channel_info(s)
             aux_info = mne.create_info(
@@ -634,9 +781,13 @@ class XDFLoader:
                 streams, stream_type=stream_type, allow_multiple=True
             )
             for s in matched:
-                onsets = np.array(s["time_stamps"]) - session_t0
+                if len(s["time_stamps"]) == 0:
+                    continue
+                onsets, inside = _times_on_grid(
+                    np.array(s["time_stamps"]), tgt_ts, eeg_native_sfreq
+                )
                 descriptions = np.array(_marker_descriptions(s["time_series"]))
-                inside = (onsets >= 0) & (onsets <= raw_duration)
+                onsets = np.clip(onsets, 0.0, raw_duration)
                 if not inside.all():
                     logger.warning(
                         "Stream '%s': %d marker(s) outside the recorded EEG "
@@ -688,23 +839,23 @@ class XDFLoader:
     def _annotate_nan_regions(
         raw: mne.io.BaseRaw,
         nan_mask: np.ndarray,
-        tgt_ts: np.ndarray,
         label: str,
-        session_t0: float,
     ) -> None:
-        """Add BAD annotations covering samples where an auxiliary stream was NaN."""
+        """Add BAD annotations covering samples where an auxiliary stream was NaN.
+
+        Onsets and durations are given in samples of the Raw grid (sample
+        ``i`` is at ``i / sfreq``), so they match the data even when the
+        EEG timestamps drift against LSL time.
+        """
+        sfreq = raw.info["sfreq"]
         padded = np.concatenate([[False], nan_mask, [False]])
         diff = np.diff(padded.astype(int))
         starts = np.where(diff == 1)[0]
-        ends = np.where(diff == -1)[0]
-        dt = float(np.median(np.diff(tgt_ts))) if len(tgt_ts) > 1 else 0.0
+        ends = np.where(diff == -1)[0]  # exclusive
         for s_idx, e_idx in zip(starts, ends):
-            onset = tgt_ts[s_idx] - session_t0
-            # e_idx is exclusive; a run reaching the last sample spans one
-            # more sample interval.
-            t_end = tgt_ts[e_idx] if e_idx < len(tgt_ts) else tgt_ts[-1] + dt
-            duration = t_end - tgt_ts[s_idx]
-            raw.annotations.append(onset, duration, f"BAD_{label}_missing")
+            raw.annotations.append(
+                s_idx / sfreq, (e_idx - s_idx) / sfreq, f"BAD_{label}_missing"
+            )
 
     def _set_montage(self, raw: mne.io.BaseRaw) -> None:
         """Resolve and apply montage."""
