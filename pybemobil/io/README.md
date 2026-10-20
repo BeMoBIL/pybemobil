@@ -220,14 +220,15 @@ exclude these regions via the annotations.
 Devices may start recording at slightly different times. For example, if the
 ECG amplifier connects 2 seconds after EEG acquisition begins:
 
-- `on_mismatch='pad'` (default): keep the full EEG time range. The ECG
-  channels have NaN (→ zero + `BAD_ecg_missing` annotation) for the first 2
-  seconds. Preferable for continuous recordings where trimming would cut
-  into usable data.
+- `on_mismatch='pad'` (default and only option): keep the full EEG time
+  range. The ECG channels have NaN (→ zero + `BAD_ecg_missing` annotation)
+  for the first 2 seconds.
 
-- `on_mismatch='crop'`: trim the recording to the intersection of all
-  Tier-1 stream time ranges. The first 2 seconds of EEG are discarded.
-  Simple and lossless for the retained window.
+Cropping to the overlap of all streams is deliberately not offered. MoBI
+recordings with many streams have frequent dropouts, so the overlap can be
+much shorter than the EEG recording, and cropping would discard usable EEG.
+Exclude the `BAD_<label>_missing` segments in the analyses that need the
+auxiliary data instead.
 
 ---
 

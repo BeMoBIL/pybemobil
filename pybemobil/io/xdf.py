@@ -295,16 +295,6 @@ def _read_montage_file(path: Path) -> mne.channels.DigMontage:
     return mne.channels.read_custom_montage(path)
 
 
-def _crop_stream(
-    stream: dict, start_time: float, end_time: float
-) -> tuple[np.ndarray, np.ndarray]:
-    """Crop stream to [start_time, end_time]."""
-    ts = np.array(stream["time_stamps"])
-    data = np.array(stream["time_series"])
-    mask = (ts >= start_time) & (ts <= end_time)
-    return data[mask], ts[mask]
-
-
 def _stream_sfreq(stream: dict) -> float:
     """Return the sampling rate to use for a regular stream.
 
@@ -482,17 +472,14 @@ class XDFLoader:
     max_nan_gap_s : float or None
         NaN gaps longer than this (seconds) in auxiliary streams are preserved
         in the output rather than bridged.  ``None`` fills all gaps.
-    on_mismatch : {'crop', 'pad'}
+    on_mismatch : {'pad'}
         Behaviour when auxiliary streams do not fully cover the EEG time range.
-        Defaults to ``'pad'``.  Options:
-
-        ``'crop'`` -- trim the recording to the intersection of all Tier-1
-        stream time ranges.  Safe when losing a few edge seconds is acceptable.
-
-        ``'pad'`` -- keep the full EEG time range; auxiliary streams that do
-        not cover the edges receive ``np.nan`` there (zeroed in Raw, marked
-        with ``BAD_<label>_missing`` annotations).  Preferable for continuous
-        recordings where trimming would discard usable data.
+        Only ``'pad'`` is supported: the full EEG time range is kept, and
+        auxiliary streams that do not cover it receive ``np.nan`` there
+        (zeroed in Raw, marked with ``BAD_<label>_missing`` annotations).
+        Cropping to the overlap of all streams is not offered: with many
+        streams and the dropouts typical of MoBI recordings it would discard
+        large amounts of usable EEG.
     """
 
     def __init__(
@@ -513,7 +500,7 @@ class XDFLoader:
         ] = "pchip",
         dejitter_timestamps: bool = False,
         max_nan_gap_s: float | None = None,
-        on_mismatch: Literal["crop", "pad"] = "pad",
+        on_mismatch: Literal["pad"] = "pad",
     ):
         self.eeg_stream_name = eeg_stream_name
         self.eeg_stream_type = eeg_stream_type
@@ -539,10 +526,16 @@ class XDFLoader:
 
     def _validate(self) -> None:
         """Check option values early, before a long XDF file is read."""
-        if self.on_mismatch not in ("crop", "pad"):
+        if self.on_mismatch == "crop":
             raise ValueError(
-                f"on_mismatch must be 'crop' or 'pad', got {self.on_mismatch!r}."
+                "on_mismatch='crop' is not supported: with many streams and the "
+                "dropouts typical of MoBI recordings, cropping to the overlap of "
+                "all streams would discard large amounts of usable EEG. Use "
+                "on_mismatch='pad' (the default); uncovered auxiliary samples are "
+                "marked with BAD_<label>_missing annotations."
             )
+        if self.on_mismatch != "pad":
+            raise ValueError(f"on_mismatch must be 'pad', got {self.on_mismatch!r}.")
         methods = {"alignment_method": self.alignment_method}
         for label, spec in self.special_streams.items():
             if "method" in spec:
@@ -636,9 +629,6 @@ class XDFLoader:
         eeg_native_sfreq = _stream_sfreq(eeg_stream)
         scale = np.array([_unit_scale(u, ch) for u, ch in zip(units, labels)])
 
-        eeg_t_start = float(eeg_stream["time_stamps"][0])
-        eeg_t_end = float(eeg_stream["time_stamps"][-1])
-
         # -- Locate Tier-1 auxiliary streams -----------------------------
         special_stream_objs: dict[str, dict] = {}
         irregular_special: dict[str, dict] = {}
@@ -664,25 +654,11 @@ class XDFLoader:
                 continue
             special_stream_objs[label] = s
 
-        # -- Determine common time window ---------------------------------
-        if self.on_mismatch == "crop":
-            start_time = eeg_t_start
-            end_time = eeg_t_end
-            for s in special_stream_objs.values():
-                start_time = max(start_time, float(s["time_stamps"][0]))
-                end_time = min(end_time, float(s["time_stamps"][-1]))
-        else:  # pad -- keep full EEG range; aux streams fill with NaN outside range
-            start_time = eeg_t_start
-            end_time = eeg_t_end
-
         # -- Build EEG RawArray -------------------------------------------
-        eeg_data, eeg_ts = _crop_stream(eeg_stream, start_time, end_time)
-        if len(eeg_ts) == 0:
-            raise RuntimeError(
-                "No EEG samples left after cropping to the common time range "
-                f"of all Tier-1 streams ({start_time:.3f}-{end_time:.3f} s). "
-                "Use on_mismatch='pad' to keep the full EEG range."
-            )
+        # The full EEG range is kept; aux streams get NaN where they do not
+        # cover it (on_mismatch='pad').
+        eeg_ts = np.asarray(eeg_stream["time_stamps"], dtype=float)
+        eeg_data = np.asarray(eeg_stream["time_series"])
         # Dropouts: insert the missing samples so that sample i is always
         # i / sfreq after the first sample (see _find_gaps).
         eeg_data = np.asarray(eeg_data, dtype=float)

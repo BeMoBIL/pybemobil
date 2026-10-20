@@ -274,20 +274,33 @@ def test_build_raw_millivolt_units():
     np.testing.assert_allclose(raw.get_data()[0], 1e-3)
 
 
-def test_build_raw_crop_aligns_to_eeg_samples(eeg_stream):
-    """In crop mode t=0 is the first kept EEG sample and aux data match it."""
+def test_build_raw_aux_aligns_to_eeg_samples(eeg_stream):
+    """t=0 is the first EEG sample and aux data match the EEG sample times."""
     ts = T0 + 2.0013 + np.arange(0, 6, 1 / 120)  # not on the EEG sample grid
     gaze = _stream("gaze", "Gaze", ts, np.c_[ts - T0, ts - T0], 120, ["gx", "gy"])
     mk = _stream("mk", "Markers", [T0 + 4.0], [["m"]], 0)
-    loader = XDFLoader(special_streams={"gaze": {"name": "gaze"}}, on_mismatch="crop")
+    loader = XDFLoader(special_streams={"gaze": {"name": "gaze"}})
     raw, _, _, session_t0 = loader._build_raw([eeg_stream, gaze, mk])
 
     eeg_ts = eeg_stream["time_stamps"]
-    kept = eeg_ts[(eeg_ts >= ts[0]) & (eeg_ts <= ts[-1])]
-    assert session_t0 == pytest.approx(kept[0])
-    # gaze channel holds its own LSL time, so it must equal the EEG sample time
-    np.testing.assert_allclose(raw.get_data(picks="gx")[0], kept - T0, atol=1e-9)
-    np.testing.assert_allclose(raw.annotations.onset, [T0 + 4.0 - session_t0])
+    assert session_t0 == pytest.approx(eeg_ts[0])
+    assert raw.n_times == len(eeg_ts)
+    # gaze holds its own LSL time, so where it covers the EEG it must equal
+    # the EEG sample time
+    covered = (eeg_ts >= ts[0]) & (eeg_ts <= ts[-1])
+    np.testing.assert_allclose(
+        raw.get_data(picks="gx")[0, covered], eeg_ts[covered] - T0, atol=1e-9
+    )
+    np.testing.assert_allclose(
+        raw.annotations.onset[raw.annotations.description == "m"],
+        [T0 + 4.0 - session_t0],
+    )
+
+
+def test_loader_rejects_crop_with_explanation():
+    """Cropping is not offered because of frequent MoBI dropouts."""
+    with pytest.raises(ValueError, match="dropouts"):
+        XDFLoader(on_mismatch="crop")
 
 
 def test_build_raw_missing_annotation_covers_last_sample(eeg_stream):
@@ -539,7 +552,7 @@ def test_build_raw_keeps_non_voltage_aux_units(eeg_stream, caplog):
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"on_mismatch": "cropp"},
+        {"on_mismatch": "trim"},
         {"alignment_method": "cubic"},
         {"special_streams": {"ecg": {"name": "ecg", "method": "spline"}}},
     ],

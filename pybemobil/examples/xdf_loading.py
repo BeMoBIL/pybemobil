@@ -39,7 +39,7 @@ loader = XDFLoader(
         "button": {"name": "ButtonBox", "type": "EXG", "method": "stim"},
     },
     alignment_method="pchip",  # default for any unlisted special streams
-    on_mismatch="crop",
+    on_mismatch="pad",  # keep the full EEG range
 )
 
 # %% Load XDF file
