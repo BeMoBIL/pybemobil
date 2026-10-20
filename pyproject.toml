@@ -22,7 +22,7 @@ dependencies = [
   "matplotlib",
   "meegkit",
   "mne-bids>=0.18",
-  "mne-denoise>=0.0.2",  # ZapLine's n_select and adaptive mode
+  "mne-denoise>=0.0.3",  # ZapLine n_select and adaptive mode (0.0.2 needs Python 3.12)
   "mne-faster",
   "mne-icalabel>=0.8",
   "mne>=1.13",
