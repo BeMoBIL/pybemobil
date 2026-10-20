@@ -85,8 +85,10 @@ def test_process_rigid_body_adds_acceleration_channels(motion_raw):
 
 
 def test_process_rigid_body_no_velocity(motion_raw):
-    """Omit velocity and acceleration when compute_velocity is False."""
-    raw_out, _ = process_rigid_body(motion_raw, compute_velocity=False)
+    """Omit velocity and acceleration when both are switched off."""
+    raw_out, _ = process_rigid_body(
+        motion_raw, compute_velocity=False, compute_acceleration=False
+    )
     assert all("_vel_" not in ch for ch in raw_out.ch_names)
     assert all("_acc_" not in ch for ch in raw_out.ch_names)
 
