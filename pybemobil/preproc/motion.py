@@ -82,9 +82,9 @@ def find_rigid_bodies(raw):
 def process_rigid_body(
     raw,
     rb_names=None,
-    lowpass_orient=8.0,
-    lowpass_pos=8.0,
-    lowpass_deriv=24.0,
+    lowpass_orient=6.0,
+    lowpass_pos=6.0,
+    lowpass_deriv=18.0,
     compute_velocity=True,
     compute_acceleration=True,
     sfreq_target=None,
@@ -127,17 +127,21 @@ def process_rigid_body(
         Rigid body identifiers to process.  If ``None``, all identifiers
         found by :func:`find_rigid_bodies` are processed.
     lowpass_orient : float | None
-        Low-pass cutoff (Hz) applied to orientation channels.  ``None``
-        skips this filter.
+        Low-pass cutoff (Hz) applied to orientation channels. Default ``6``,
+        BeMoBIL's ``lowpass_motion``. ``None`` skips this filter.
     lowpass_pos : float | None
-        Low-pass cutoff (Hz) applied to position channels.  ``None`` skips.
+        Low-pass cutoff (Hz) applied to position channels. Default ``6``
+        (``lowpass_motion``). ``None`` skips.
     lowpass_deriv : float | None
         Low-pass cutoff (Hz) applied to velocity and acceleration channels
-        *after* differentiation.  ``None`` skips.
+        *after* differentiation. Default ``18``, BeMoBIL's
+        ``lowpass_motion_after_derivative``. ``None`` skips.
     compute_velocity : bool
         Whether to compute and append velocity channels.
     compute_acceleration : bool
-        Whether to compute and append acceleration channels.
+        Whether to compute and append acceleration channels. Works with
+        ``compute_velocity=False`` too: the velocity is then computed
+        internally but not appended.
     sfreq_target : float | None
         If not ``None``, resample the recording to this rate after the
         quaternion conversion and before filtering and differentiation.
@@ -286,10 +290,11 @@ def process_rigid_body(
         src_data = raw_out.get_data(picks=all_src_chs)  # (n_chs, n_times)
         appended_chs: list[str] = list(orient_chs) + list(pos_chs)
 
-        if compute_velocity:
+        if compute_velocity or compute_acceleration:
             vel_data = np.gradient(src_data, 1.0 / sfreq, axis=1)
             if lowpass_deriv is not None:
                 vel_data = _lowpass_array(vel_data, sfreq, lowpass_deriv)
+        if compute_velocity:
             vel_names = [_src_to_deriv(ch, "_vel") for ch in all_src_chs]
             vel_raw = mne.io.RawArray(
                 vel_data,
@@ -300,19 +305,19 @@ def process_rigid_body(
             raw_out.add_channels([vel_raw], force_update_info=True)
             appended_chs.extend(vel_names)
 
-            if compute_acceleration:
-                acc_data = np.gradient(vel_data, 1.0 / sfreq, axis=1)
-                if lowpass_deriv is not None:
-                    acc_data = _lowpass_array(acc_data, sfreq, lowpass_deriv)
-                acc_names = [_src_to_deriv(ch, "_acc") for ch in all_src_chs]
-                acc_raw = mne.io.RawArray(
-                    acc_data,
-                    mne.create_info(acc_names, sfreq, ["misc"] * len(acc_names)),
-                    verbose=False,
-                )
-                acc_raw.set_meas_date(raw_out.info["meas_date"])
-                raw_out.add_channels([acc_raw], force_update_info=True)
-                appended_chs.extend(acc_names)
+        if compute_acceleration:
+            acc_data = np.gradient(vel_data, 1.0 / sfreq, axis=1)
+            if lowpass_deriv is not None:
+                acc_data = _lowpass_array(acc_data, sfreq, lowpass_deriv)
+            acc_names = [_src_to_deriv(ch, "_acc") for ch in all_src_chs]
+            acc_raw = mne.io.RawArray(
+                acc_data,
+                mne.create_info(acc_names, sfreq, ["misc"] * len(acc_names)),
+                verbose=False,
+            )
+            acc_raw.set_meas_date(raw_out.info["meas_date"])
+            raw_out.add_channels([acc_raw], force_update_info=True)
+            appended_chs.extend(acc_names)
 
         rb_info[rb] = {"mode": mode, "channels": appended_chs, "n_missing": n_missing}
         LOGGER.info(f"  {rb}: processed ({mode}), channels: {appended_chs}")

@@ -82,3 +82,20 @@ def test_dropout_is_annotated_once():
     raw.annotations.append(8.0, 0.5, "BAD_rb_missing")  # as XDFLoader does
     out, _ = process_rigid_body(raw)
     assert (out.annotations.description == "BAD_rb_missing").sum() == 1
+
+
+def test_defaults_match_bemobil():
+    """Low-pass defaults are BeMoBIL's lowpass_motion / _after_derivative."""
+    import inspect
+
+    params = inspect.signature(process_rigid_body).parameters
+    assert params["lowpass_orient"].default == 6.0
+    assert params["lowpass_pos"].default == 6.0
+    assert params["lowpass_deriv"].default == 18.0
+
+
+def test_acceleration_without_velocity(motion_raw):
+    """compute_acceleration works when velocity channels are not requested."""
+    out, _ = process_rigid_body(motion_raw, compute_velocity=False)
+    assert not [ch for ch in out.ch_names if "_vel_" in ch]
+    assert "head_pos_acc_x" in out.ch_names
