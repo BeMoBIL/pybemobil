@@ -5,13 +5,13 @@
 import logging
 import numbers
 import textwrap
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
 from matplotlib.colors import TwoSlopeNorm
-from mne.viz.evoked import _get_ci_function_pce
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from PIL import Image
@@ -24,6 +24,38 @@ _SPECTRUM_TYPES = (mne.time_frequency.Spectrum, mne.time_frequency.EpochsSpectru
 
 
 # %% General viz functions
+
+
+def _ci_function(ci):
+    """Return a function computing (lower, upper) confidence bounds.
+
+    Uses MNE's (private) helper when available and falls back to a
+    parametric band (mean +/- t * SEM) otherwise, so a renamed MNE internal
+    cannot break ``import pybemobil``.
+    """
+    try:
+        from mne.viz.evoked import _get_ci_function_pce
+    except ImportError:
+        pass
+    else:
+        return _get_ci_function_pce(ci, do_topo=False)
+    if callable(ci):
+        return ci
+    level = 0.95 if ci is True else float(ci)
+
+    def _parametric(data):
+        from scipy import stats
+
+        data = np.asarray(data)
+        mean = data.mean(axis=0)
+        n = data.shape[0]
+        if n < 2:
+            return mean, mean
+        sem = data.std(axis=0, ddof=1) / np.sqrt(n)
+        half = sem * stats.t.ppf((1 + level) / 2, n - 1)
+        return mean - half, mean + half
+
+    return _parametric
 
 
 def glue_imgs(fnames, fname, delete_fnames=True):
@@ -120,14 +152,14 @@ def plot_PSD(
     See Also
     --------
     mne.Evoked.compute_psd : For more information on the PSD computation.
-    mne.viz.evoked._get_ci_function_pce : For computing confidence intervals.
+    mne.viz.plot_compare_evokeds : Confidence bands for evoked responses.
     """
     freqs = None
     unit = None
     eps = np.finfo(float).eps
 
     if ci:
-        ci_fun = _get_ci_function_pce(ci, do_topo=False)
+        ci_fun = _ci_function(ci)
 
     inst_dict = _check_input_type(inst_dict, domain="freq")
     psd_dict = _prepare_psd(inst_dict, fmin=fmin, fmax=fmax, picks=picks)
@@ -815,12 +847,27 @@ def plot_ERSP(
     tfr_kwargs=None,
     plot_kwargs=None,
 ):
-    """Use plot_TFR instead. Deprecated for naming consistencies."""
-    LOGGER.warning(
-        DeprecationWarning(
-            "The plot_ERSP function is deprecated and will be removed in a "
-            "future version. Please use plot_TFR instead."
-        )
+    """Plot time-frequency representations (deprecated, use :func:`plot_TFR`).
+
+    .. deprecated::
+        ``plot_ERSP`` will be removed in a future version. It takes the same
+        parameters as :func:`plot_TFR` and passes them on unchanged.
+
+    Parameters
+    ----------
+    inst_dict : dict
+        See :func:`plot_TFR`; all other parameters are passed on unchanged.
+
+    Returns
+    -------
+    fig_dict : dict
+        See :func:`plot_TFR`.
+    """
+    warnings.warn(
+        "plot_ERSP is deprecated and will be removed in a future version; "
+        "use plot_TFR instead.",
+        FutureWarning,
+        stacklevel=2,
     )
     return plot_TFR(
         inst_dict,
