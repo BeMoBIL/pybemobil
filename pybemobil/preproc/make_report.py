@@ -303,6 +303,24 @@ def _add_bad_segments_plot(
     plt.close(fig)
 
 
+# The ICA section of the report is built from at most this many epochs
+# (evenly spaced over the recording) to bound its memory use.
+_ICA_REPORT_MAX_EPOCHS = 300
+
+
+def _epochs_for_ica_report(epochs, max_epochs=_ICA_REPORT_MAX_EPOCHS):
+    """Return EEG-only, loaded epochs for :meth:`mne.Report.add_ica`.
+
+    ``add_ica`` needs several times the memory of the epochs it gets, so it
+    gets the EEG channels (all the ICA uses) of at most *max_epochs* evenly
+    spaced epochs; only those are loaded.
+    """
+    n = len(epochs.events)  # len(epochs) needs loaded epochs
+    if n > max_epochs:
+        epochs = epochs[np.linspace(0, n - 1, max_epochs).astype(int)]
+    return epochs.load_data().pick("eeg")
+
+
 def _add_ica_segments(
     report,
     *,
@@ -632,7 +650,7 @@ def _add_tier2_stream_plots(
         plt.close(fig)
 
 
-def _plot_dipoles_figure(dipole_idx, dipoles, ica, residuals, trans):
+def _plot_dipoles_figure(dipole_idx, dipoles, ica, residuals, trans, subjects_dir):
     """Return a matplotlib figure showing one dipole with IC/residual insets."""
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
@@ -640,6 +658,7 @@ def _plot_dipoles_figure(dipole_idx, dipoles, ica, residuals, trans):
         fig = mne.viz.plot_dipole_locations(
             dipoles[dipole_idx],
             subject="fsaverage",
+            subjects_dir=subjects_dir,
             trans=trans,
             mode="orthoview",
             show=False,
@@ -686,8 +705,7 @@ def _add_dipole_figures(report, dipoles, ica, residuals, trans, subjects_dir):
             )
             continue
 
-        os.environ.setdefault("SUBJECTS_DIR", str(subjects_dir))
-        fig = _plot_dipoles_figure(i, dipoles, ica, residuals, trans)
+        fig = _plot_dipoles_figure(i, dipoles, ica, residuals, trans, subjects_dir)
         buf = _io.BytesIO()
         fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
         plt.close(fig)
@@ -740,6 +758,33 @@ def make_report(
         montage, annotations, events, and all ICA plots.
     raw_clean : mne.io.BaseRaw
         The fully processed recording.
+    ica : mne.preprocessing.ICA
+        The ICA of the run; an unfitted ICA (``fit_ica=False``) skips the
+        ICA sections.
+    ic_labels : dict
+        ICLabel output (``"labels"`` and ``"y_pred_proba"``), see
+        :func:`~pybemobil.preproc.utils.compute_ica`.
+    dipoles : list
+        One :class:`mne.Dipole` (or ``None``) per IC, see
+        :func:`~pybemobil.preproc.fit_dipoles_on_ica`; empty if no dipoles
+        were fitted.
+    residuals : list
+        Residual field of each dipole fit, aligned with *dipoles*.
+    trans : mne.transforms.Transform | None
+        Head-to-MRI transform used for the dipole fits.
+    bad_ch_dict : dict
+        Output of :func:`~pybemobil.preproc.get_bad_chs`.
+    fname_out : str | Path | None
+        The pipeline's *fname_out*: used for the report title and to save
+        figures to the ``"figures"`` folder of
+        :func:`~pybemobil.preproc.get_derivative_paths`.
+    event_id : dict | None
+        Event names and codes for the ERP sections; ``None`` skips them.
+    thresh : float
+        ICLabel threshold, shown in the ICLabel section.
+    step_timings : list of dict | None
+        Duration of each pipeline step (``"name"`` and ``"duration_s"``),
+        shown as a table.
     tier2 : dict | None
         Tier-2 streams from :class:`~pybemobil.io.MultimodalRecording`
         (kept at native rate, not merged into ``raw``).  Each stream is
@@ -760,6 +805,11 @@ def make_report(
         so the effect of the full pipeline is visible. If ``None`` (e.g. when
         rebuilding a report from cached outputs and the BIDS raw cannot be
         found), ``raw_pre_ica`` is shown instead.
+
+    Returns
+    -------
+    report : mne.Report
+        The report; save it with :meth:`mne.Report.save`.
     """
     old_log_level = mne.set_log_level("warning", return_old_level=True)
     figs_before = set(plt.get_fignums())
@@ -974,7 +1024,7 @@ def _build_report(
             tmax=0.8,
             baseline=(None, 0),
         )
-        inst_epochs = mne.Epochs(raw_pre_ica, **epo_kwargs)
+        inst_epochs = mne.Epochs(raw_pre_ica, **{**epo_kwargs, "preload": False})
         raw_clean_lp = raw_clean.copy().filter(l_freq=None, h_freq=20)
         inst_clean = mne.Epochs(raw_clean_lp, **epo_kwargs)
         del raw_clean_lp
@@ -1004,7 +1054,7 @@ def _build_report(
             title="Event ID",
         )
         inst_epochs = mne.make_fixed_length_epochs(
-            raw_pre_ica, duration=1, preload=True
+            raw_pre_ica, duration=1, preload=False
         )
 
     # --- ICA ---
@@ -1022,7 +1072,12 @@ def _build_report(
             except Exception as exc:
                 warnings.warn(f"Skipping pre-ICA bad segments plot: {exc}")
 
-        report.add_ica(ica, title="ICA", inst=inst_epochs, n_jobs=ICA_REPORT_N_JOBS)
+        report.add_ica(
+            ica,
+            title="ICA",
+            inst=_epochs_for_ica_report(inst_epochs),
+            n_jobs=ICA_REPORT_N_JOBS,
+        )
 
         # EOG overlay
         ch_types = raw_pre_ica.get_channel_types()

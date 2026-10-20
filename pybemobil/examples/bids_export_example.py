@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
     make_bids_dataset_description(
         bids_root=bids_root,
         name="eegbci-motor-imagery-demo",
-        authors=["BPN Lab"],
+        authors=["Jane Doe", "John Doe"],
         data_license="CC0",
     )
 
@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
     make_bids_dataset_description(
         bids_root=bids_root,
         name="eegbci-motor-imagery-demo",
-        authors=["BPN Lab"],
+        authors=["Jane Doe", "John Doe"],
     )
 
     # subject_runs: list of dicts, one entry per run

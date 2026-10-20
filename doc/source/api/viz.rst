@@ -31,7 +31,6 @@ Time-frequency
 
    plot_TFR
    plot_tfr_topomaps
-   plot_ERSP
 
 ----
 
