@@ -13,14 +13,14 @@ import numpy as np
 
 
 class NumpyEncoder(json.JSONEncoder):
-    """Help encoding numpy arrays in JSON."""
+    """Help encoding numpy arrays and scalars in JSON."""
 
     def default(self, obj):
-        """Convert numpy arrays and floats to lists and native floats."""
+        """Convert numpy arrays and scalars to lists and native Python types."""
         if isinstance(obj, np.ndarray):
             return obj.tolist()
-        if isinstance(obj, np.float32):
-            return float(obj)
+        if isinstance(obj, np.generic):  # np.int64, np.float32, np.bool_, ...
+            return obj.item()
         return super().default(obj)
 
 
