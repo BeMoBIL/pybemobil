@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 from matplotlib.colors import TwoSlopeNorm
-from mne.viz.evoked import _get_ci_function_pce
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from PIL import Image
@@ -20,8 +19,42 @@ from PIL import Image
 
 LOGGER = logging.getLogger(__name__)
 
+_SPECTRUM_TYPES = (mne.time_frequency.Spectrum, mne.time_frequency.EpochsSpectrum)
+
 
 # %% General viz functions
+
+
+def _ci_function(ci):
+    """Return a function computing (lower, upper) confidence bounds.
+
+    Uses MNE's (private) helper when available and falls back to a
+    parametric band (mean +/- t * SEM) otherwise, so a renamed MNE internal
+    cannot break ``import pybemobil``.
+    """
+    try:
+        from mne.viz.evoked import _get_ci_function_pce
+    except ImportError:
+        pass
+    else:
+        return _get_ci_function_pce(ci, do_topo=False)
+    if callable(ci):
+        return ci
+    level = 0.95 if ci is True else float(ci)
+
+    def _parametric(data):
+        from scipy import stats
+
+        data = np.asarray(data)
+        mean = data.mean(axis=0)
+        n = data.shape[0]
+        if n < 2:
+            return mean, mean
+        sem = data.std(axis=0, ddof=1) / np.sqrt(n)
+        half = sem * stats.t.ppf((1 + level) / 2, n - 1)
+        return mean - half, mean + half
+
+    return _parametric
 
 
 def glue_imgs(fnames, fname, delete_fnames=True):
@@ -118,14 +151,14 @@ def plot_PSD(
     See Also
     --------
     mne.Evoked.compute_psd : For more information on the PSD computation.
-    mne.viz.evoked._get_ci_function_pce : For computing confidence intervals.
+    mne.viz.plot_compare_evokeds : Confidence bands for evoked responses.
     """
     freqs = None
     unit = None
     eps = np.finfo(float).eps
 
     if ci:
-        ci_fun = _get_ci_function_pce(ci, do_topo=False)
+        ci_fun = _ci_function(ci)
 
     inst_dict = _check_input_type(inst_dict, domain="freq")
     psd_dict = _prepare_psd(inst_dict, fmin=fmin, fmax=fmax, picks=picks)
@@ -485,7 +518,8 @@ def plot_TFR(
     tmax : float | None
         End time after event, by default 1.
     baseline : tuple | None
-        Time interval for baseline correction, by default (None, 0).
+        Time interval for baseline correction. Default ``None`` (no baseline
+        correction).
     picks : list of str or list of int | None
         Channel names or, in the case of ICA, channel indices, e.g., [3].
         Defaults to ``None``, which means picking all channels or sources.
@@ -532,23 +566,24 @@ def plot_TFR(
 
     # get info and other parameters
     info = next(iter(tfr_dict.values())).info
-    channel_list = [
-        ch for ch in info.ch_names if info.get_channel_types(picks=[ch])[0] == "eeg"
-    ]
+    # ICA sources are "misc" channels named ICA000, ICA001, ...
+    is_sources = is_sources or all("ICA" in ch_name for ch_name in info.ch_names)
+    if is_sources:
+        channel_list = [ch for ch in info.ch_names if "ICA" in ch] or info.ch_names
+    else:
+        channel_list = [
+            ch for ch in info.ch_names if info.get_channel_types(picks=[ch])[0] == "eeg"
+        ]
 
     if picks is None or not list(picks):
         picks = channel_list
+    if is_sources:
+        picks = [f"ICA{i:03}" if isinstance(i, int) else i for i in picks]
 
     if not combine:
         ch_list = picks
     else:
         ch_list = [picks]
-
-    # Add sensor insets if available
-    if is_sources or all(["ICA" in ch_name for ch_name in channel_list]):
-        # Working with ICA sources
-        picks = [f"ICA{i:03}" if isinstance(i, int) else i for i in picks]
-        is_sources = True
 
     show_sensors = True
     if not info.get("dig") or is_sources:
@@ -798,40 +833,6 @@ def plot_tfr_topomaps(
     return figs
 
 
-def plot_ERSP(
-    inst_dict,
-    *,
-    freqs=np.arange(1, 41),
-    tmin=-0.5,
-    tmax=1,
-    baseline=None,
-    picks=None,
-    combine=None,
-    is_sources=False,
-    tfr_kwargs=None,
-    plot_kwargs=None,
-):
-    """Use plot_TFR instead. Deprecated for naming consistencies."""
-    LOGGER.warning(
-        DeprecationWarning(
-            "The plot_ERSP function is deprecated and will be removed in a "
-            "future version. Please use plot_TFR instead."
-        )
-    )
-    return plot_TFR(
-        inst_dict,
-        freqs=freqs,
-        tmin=tmin,
-        tmax=tmax,
-        baseline=baseline,
-        picks=picks,
-        combine=combine,
-        is_sources=is_sources,
-        tfr_kwargs=tfr_kwargs,
-        plot_kwargs=plot_kwargs,
-    )
-
-
 # %% Time domain functions
 
 
@@ -1004,28 +1005,29 @@ def plot_ERP(
     for j in range(i + 1, n_rows * n_cols):
         axs.flat[j].remove()
 
-    # potentially add ROI and baseline spans
-    for ax in axs.flat:
-        if ax.get_title() in picks:
-            spans = []
-            if baseline:
-                ax.axvspan(baseline[0], baseline[1], alpha=0.1, color="black")
-                spans.append(("baseline", baseline))
-            if roi:
-                ax.axvspan(roi[0], roi[1], alpha=0.1, color="black")
-                spans.append(("roi", roi))
+    # potentially add ROI and baseline spans to every axis that holds data
+    # (titles cannot be used to find them: with combine or integer picks
+    # they are not channel names)
+    for ax in list(axs.flat)[: i + 1]:
+        spans = []
+        if baseline:
+            ax.axvspan(baseline[0], baseline[1], alpha=0.1, color="black")
+            spans.append(("baseline", baseline))
+        if roi:
+            ax.axvspan(roi[0], roi[1], alpha=0.1, color="black")
+            spans.append(("roi", roi))
 
-            for vspan in spans:
-                name, span = vspan
-                start, end = span
-                ax.annotate(
-                    f"{name}",
-                    xy=((start + end) / 2, 0),
-                    xycoords=("data", "axes fraction"),
-                    ha="center",
-                    va="bottom",
-                    fontsize=plt.rcParams["xtick.labelsize"],
-                )
+        for vspan in spans:
+            name, span = vspan
+            start, end = span
+            ax.annotate(
+                f"{name}",
+                xy=((start + end) / 2, 0),
+                xycoords=("data", "axes fraction"),
+                ha="center",
+                va="bottom",
+                fontsize=plt.rcParams["xtick.labelsize"],
+            )
 
     return fig
 
@@ -1102,7 +1104,9 @@ def plot_various_ERPs(
     # initialize variables (work on copies: event_id is edited below)
     event_id = dict(event_id)
     epochs = []
-    event_list = list(event_id.keys())
+    # Events to plot: the subtraction event itself is only used to correct
+    # the targets and is not plotted.
+    event_list = [e for e in event_id if e != subtraction_event]
     evokeds_dict = {event: [] for event in event_list}
 
     # iterate over raw(s)
@@ -1142,10 +1146,6 @@ def plot_various_ERPs(
                 epochs = _get_substracted_epochs(
                     epochs, subtraction_event, subtraction_targets, event_list
                 )
-                # remove the subtraction event from the list and from event_id
-                if subtraction_event in event_list:
-                    event_list.remove(subtraction_event)
-                    del event_id[subtraction_event]
 
             # No wave difference calculation
             else:
@@ -1546,6 +1546,8 @@ def _check_input_type(inst_dict, domain):
                     | mne.time_frequency.tfr.AverageTFR,
                 ):
                     LOGGER.info("Working with TFRs.")
+            elif isinstance(entries, _SPECTRUM_TYPES):
+                out_dict[key] = [entries]
             elif isinstance(entries, mne.BaseEpochs):
                 LOGGER.info("Working with epochs in frequency domain")
                 out_dict[key] = [entries]
@@ -1612,39 +1614,54 @@ def _prepare_psd(
         default_kwargs.update(kwargs)
     kwargs = default_kwargs
 
+    def _as_spectrum(entry):
+        # Spectra (e.g. a baseline computed elsewhere) are used as given
+        if isinstance(entry, _SPECTRUM_TYPES):
+            return entry.copy().pick("data" if picks is None else picks, exclude="bads")
+        return entry.compute_psd(fmin=fmin, fmax=fmax, picks=picks, **kwargs)
+
     for key, entries in inst_dict.items():
-        if isinstance(entries, mne.BaseEpochs | mne.Evoked):
-            psds = [entries.compute_psd(fmin=fmin, fmax=fmax, picks=picks, **kwargs)]
-            psd_dict[key] = psds
+        entries = entries if isinstance(entries, list) else [entries]
+        psd_dict[key] = [_as_spectrum(entry) for entry in entries]
 
-        elif isinstance(entries, list):
-            psds = []
-            for entry in entries:
-                psds.append(
-                    entry.compute_psd(fmin=fmin, fmax=fmax, picks=picks, **kwargs)
-                )
-            psd_dict[key] = psds
-
-    freqs = psds[0].freqs
-    units = psds[0].units()
+    spectra = next(iter(psd_dict.values()))
+    units = spectra[0].units()
     unit = units.get("eeg", next(iter(units.values())))
-    ch_names = psds[0].ch_names
+    ch_names = spectra[0].ch_names
 
     for event, psds in psd_dict.items():
         all_psds = []
         for psd in psds:
-            data = psd.get_data()  # (n_epochs, n_channels, n_freqs) or (n_ch, n_f)
-            if data.ndim == 3:  # Epochs: average over epochs; Evoked has none
-                data = data.mean(axis=0)
+            # (n_epochs, n_channels, n_freqs) or (n_channels, n_freqs)
+            data, freqs = psd.get_data(fmin=fmin, fmax=fmax, return_freqs=True)
             all_psds.append(data)
 
-        all_psds = np.stack(all_psds, axis=0)  # shape: (n_subs, n_channels, n_freqs)
+        if len(all_psds) == 1 and all_psds[0].ndim == 3:
+            # One Epochs object: the epochs are the observations, so the
+            # confidence band reflects the variability across epochs.
+            all_psds = all_psds[0]
+        else:
+            # Several objects (e.g. subjects): average each over its epochs
+            all_psds = np.stack(
+                [d.mean(axis=0) if d.ndim == 3 else d for d in all_psds], axis=0
+            )
         mean_psd = all_psds.mean(axis=0)  # (n_channels, n_freqs)
         psd_dict[event] = dict(
             mean=mean_psd, all=all_psds, freqs=freqs, unit=unit, ch_names=ch_names
         )
 
     return psd_dict
+
+
+def _tfr_kwargs_for(inst, tfr_kwargs):
+    """Return *tfr_kwargs*, picking ICA sources (misc channels) when needed.
+
+    ``compute_tfr`` picks only data channels by default, which excludes the
+    misc-typed ICA source channels.
+    """
+    if "picks" not in tfr_kwargs and all("ICA" in ch for ch in inst.ch_names):
+        return {**tfr_kwargs, "picks": "all"}
+    return tfr_kwargs
 
 
 def _prepare_tfr(
@@ -1738,7 +1755,10 @@ def _prepare_tfr(
                     LOGGER.info(f"Epochs were passed. Computing TFR for {key} - {inst}")
                     temp_list.append(
                         _baseline_crop_tfr(
-                            inst.compute_tfr(**tfr_kwargs), tmin, tmax, baseline
+                            inst.compute_tfr(**_tfr_kwargs_for(inst, tfr_kwargs)),
+                            tmin,
+                            tmax,
+                            baseline,
                         ).average()
                     )
                 else:
@@ -1764,7 +1784,10 @@ def _prepare_tfr(
             # case: single Epochs
             LOGGER.info(f"Epochs were passed. Computing TFR for {key} - {inst_list}")
             tfr_dict[key] = _baseline_crop_tfr(
-                inst_list.compute_tfr(**tfr_kwargs), tmin, tmax, baseline
+                inst_list.compute_tfr(**_tfr_kwargs_for(inst_list, tfr_kwargs)),
+                tmin,
+                tmax,
+                baseline,
             ).average()
         else:
             raise TypeError(f"Expected EpochsTFR or AverageTFR, got {type(inst_list)}.")
@@ -1789,7 +1812,8 @@ def _get_substracted_epochs(epochs, subtraction_event, subtraction_targets, even
     Returns
     -------
     subtracted_epochs : mne.Epochs
-        The epochs object containing the subtracted data
+        The epochs of every event in *event_list*: the targets with the
+        subtraction event's ERP subtracted, the other events unchanged.
     """
     epoch_list = []
 
@@ -1814,8 +1838,10 @@ def _get_substracted_epochs(epochs, subtraction_event, subtraction_targets, even
                 )
             )
             done_something = True
+        elif event != subtraction_event:
+            epoch_list.append(epochs[event])
 
-    # Concatenate the epochs of the two classes
+    # Concatenate the epochs of all plotted events
     subtracted_epochs = mne.concatenate_epochs(
         epoch_list,
         add_offset=False,
