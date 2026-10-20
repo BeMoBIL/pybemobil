@@ -27,11 +27,8 @@ from pybemobil.viz.plotting import glue_imgs
 
 LOGGER = logging.getLogger(__name__)
 
-# Parallel jobs for the ICA section of the report (BPN_REPORT_N_JOBS is the
-# old name of the variable).
-ICA_REPORT_N_JOBS = int(
-    os.environ.get("PYBEMOBIL_REPORT_N_JOBS", os.environ.get("BPN_REPORT_N_JOBS", "1"))
-)
+# Parallel jobs for the ICA section of the report.
+ICA_REPORT_N_JOBS = int(os.environ.get("PYBEMOBIL_REPORT_N_JOBS", "1"))
 
 try:
     import seaborn as _sns
