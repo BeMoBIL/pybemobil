@@ -65,25 +65,34 @@ def _gui_available() -> bool:
     return bool(os.environ.get("DISPLAY", ""))
 
 
+def _esc(value) -> str:
+    """Escape *value* for HTML (channel names and markers come from data)."""
+    return _html.escape(str(value))
+
+
+def _esc_list(values) -> str:
+    """Return an escaped, comma-separated list, or *none* in italics."""
+    return ", ".join(_esc(v) for v in values) if values else "<em>none</em>"
+
+
 def _generate_bads_html(
     bads_dict: dict, title: str, api_docs: str | None = None
 ) -> str:
     """Return an HTML summary of a bad-channel dictionary."""
-    lines = [f"<h3>{title}</h3>"]
+    lines = [f"<h3>{_esc(title)}</h3>"]
     if api_docs:
-        lines.append(f'<p>See <a href="{api_docs}">{api_docs}</a> for details.</p>')
+        url = _esc(api_docs)
+        lines.append(f'<p>See <a href="{url}">{url}</a> for details.</p>')
     for key, value in bads_dict.items():
         if isinstance(value, list):
-            ch_str = ", ".join(value) if value else "<em>none</em>"
-            lines.append(f"<p><strong>{key}</strong>: {ch_str}</p>")
+            lines.append(f"<p><strong>{_esc(key)}</strong>: {_esc_list(value)}</p>")
         elif isinstance(value, dict):
-            lines.append(f"<p><strong>{key}</strong>:</p><ul>")
+            lines.append(f"<p><strong>{_esc(key)}</strong>:</p><ul>")
             for sub_key, sub_val in value.items():
-                sub_str = ", ".join(sub_val) if sub_val else "<em>none</em>"
-                lines.append(f"  <li>{sub_key}: {sub_str}</li>")
+                lines.append(f"  <li>{_esc(sub_key)}: {_esc_list(sub_val)}</li>")
             lines.append("</ul>")
         else:
-            lines.append(f"<p><strong>{key}</strong>: {value}</p>")
+            lines.append(f"<p><strong>{_esc(key)}</strong>: {_esc(value)}</p>")
     return "\n".join(lines)
 
 
@@ -94,7 +103,7 @@ def _timings_to_html(step_timings: list[dict]) -> str:
     for t in step_timings:
         share = (t["duration_s"] / total * 100) if total else 0.0
         rows_html.append(
-            f"<tr><td>{t['name']}</td>"
+            f"<tr><td>{_esc(t['name'])}</td>"
             f"<td>{format_duration(t['duration_s'])}</td>"
             f"<td>{share:.1f}</td></tr>"
         )
@@ -133,14 +142,15 @@ def _iclabel_to_html(ic_labels: dict, thresh: float, excluded: list) -> str:
         flagged = idx in excluded_set
         row_style = " style='background:#ffe0e0'" if flagged else ""
         rows_html.append(
-            f"<tr{row_style}><td>{idx}</td><td>{label}</td><td>{max_prob:.3f}</td></tr>"
+            f"<tr{row_style}><td>{idx}</td><td>{_esc(label)}</td>"
+            f"<td>{max_prob:.3f}</td></tr>"
         )
 
     header = "<tr><th>IC</th><th>Label</th><th>Max Prob</th></tr>"
     return (
         "<table border='1' style='border-collapse:collapse;'>"
         f"{header}{''.join(rows_html)}</table>"
-        f"<p>Threshold: <code>{thresh}</code>. "
+        f"<p>Threshold: <code>{_esc(thresh)}</code>. "
         "Red rows = components excluded by <code>compute_ica</code>.</p>"
     )
 
@@ -879,7 +889,7 @@ def _build_report(
     all_bads = bad_ch_dict.get("all_bads", [])
     bads_summary_html = (
         f"<p><strong>All bad channels ({len(all_bads)}):</strong> "
-        + (", ".join(all_bads) if all_bads else "<em>none</em>")
+        + _esc_list(all_bads)
         + "</p>"
     )
     report.add_html(bads_summary_html, title="Bad channels: summary")
@@ -904,7 +914,7 @@ def _build_report(
         chs = bad_ch_dict["bad_by_line_noise"]
         html = (
             "<p>Channels flagged by per-channel line-noise z-score criterion.</p>"
-            "<p>" + (", ".join(chs) if chs else "<em>none</em>") + "</p>"
+            "<p>" + _esc_list(chs) + "</p>"
         )
         report.add_html(html, title="Bad channels: line noise")
 
@@ -935,7 +945,7 @@ def _build_report(
     annot_counts = raw_pre_ica.annotations.count()
     annot_html = (
         "<p>Annotation counts in the preprocessed data.</p>"
-        f"<pre><code>{json.dumps(annot_counts, indent=4)}</code></pre>"
+        f"<pre><code>{_esc(json.dumps(annot_counts, indent=4))}</code></pre>"
     )
     report.add_html(annot_html, title="Annotation counts")
 
@@ -962,7 +972,7 @@ def _build_report(
     if len(events) > 0:
         event_id_html = (
             "<p>Event map supplied for epoch creation.</p>"
-            f"<pre><code>{json.dumps(event_id, indent=4)}</code></pre>"
+            f"<pre><code>{_esc(json.dumps(event_id, indent=4))}</code></pre>"
         )
         if missing_conds:
             event_id_html += (
@@ -1063,7 +1073,7 @@ def _build_report(
                 else:
                     warnings.warn(f"Skipping ICA EOG overlay: {err}")
                     report.add_html(
-                        f"<p>ICA EOG overlay skipped: {err}</p>",
+                        f"<p>ICA EOG overlay skipped: {_esc(err)}</p>",
                         title="ICA EOG removal",
                     )
 
