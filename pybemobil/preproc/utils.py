@@ -629,6 +629,7 @@ def compute_ica(
     epochs = mne.make_fixed_length_epochs(
         raw_ica, duration=1.0, preload=True, reject_by_annotation=reject_by_annotation
     )
+    del raw_ica  # everything below works on the epochs
     # Apply the average-reference projection so that ICLabel sees a properly
     # CAR-referenced dataset (otherwise it emits a warning and may classify
     # components less accurately).
@@ -662,7 +663,8 @@ def compute_ica(
         # compute_rank's default picks, causing a mismatch unrelated to the
         # average reference.
         picks_eeg = mne.pick_types(epochs.info, eeg=True, exclude="bads")
-        rank_dict = mne.compute_rank(epochs.copy().pick(picks_eeg), tol="auto")
+        # epochs hold EEG only, and compute_rank excludes bads like picks_eeg
+        rank_dict = mne.compute_rank(epochs, tol="auto")
         n_components = sum(rank_dict.values())
 
         _jamica_kw = _resolve_jamica_kwargs(jamica_kwargs)
