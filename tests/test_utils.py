@@ -467,7 +467,7 @@ def _fake_iclabel(labels):
     [
         ({"exclude_labels": ["eye blink"]}, {"eye blink"}),
         ({"include_labels": ["brain"]}, {"eye blink", "muscle artifact", "other"}),
-        ({}, {"eye blink", "muscle artifact"}),  # default keep: brain + other
+        ({}, {"eye blink"}),  # default keep: all but eye blink, as in BeMoBIL
     ],
 )
 def test_compute_ica_popularity_vote_labels(rng, kwargs, expected):

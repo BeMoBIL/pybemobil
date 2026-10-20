@@ -52,9 +52,12 @@ pipeline outputs.
 Bad channel detection
 ---------------------
 
-Standalone bad-channel detector that combines PyPREP, FASTER, per-channel
-flatline detection, and a line-noise z-score criterion.  Called automatically
-by :class:`EEGPreprocessor` but can also be run on any
+Standalone bad-channel detector that combines PyPREP (NaN/flat, deviation,
+high-frequency noise, correlation and RANSAC), FASTER's correlation and
+variance criteria, and an optional line-noise z-score criterion. It works on
+a 1 Hz high-passed, average-referenced copy (flat channels are found before
+referencing) and warns when more than a fifth of the channels is flagged.
+Called automatically by :class:`EEGPreprocessor` but can also be run on any
 :class:`mne.io.Raw` object directly.
 
 .. autosummary::

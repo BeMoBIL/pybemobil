@@ -98,7 +98,6 @@ addopts = """--cov=pybemobil --cov-report=html --cov-config=pyproject.toml
     --durations=20 -ra --junit-xml=junit-results.xml --tb=short
     --ignore=doc -n auto"""
 filterwarnings = [
-  "ignore::ImportWarning",
   "ignore::DeprecationWarning:mne",
 ]
 testpaths = ["tests"]
