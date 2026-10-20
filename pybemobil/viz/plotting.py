@@ -1006,28 +1006,29 @@ def plot_ERP(
     for j in range(i + 1, n_rows * n_cols):
         axs.flat[j].remove()
 
-    # potentially add ROI and baseline spans
-    for ax in axs.flat:
-        if ax.get_title() in picks:
-            spans = []
-            if baseline:
-                ax.axvspan(baseline[0], baseline[1], alpha=0.1, color="black")
-                spans.append(("baseline", baseline))
-            if roi:
-                ax.axvspan(roi[0], roi[1], alpha=0.1, color="black")
-                spans.append(("roi", roi))
+    # potentially add ROI and baseline spans to every axis that holds data
+    # (titles cannot be used to find them: with combine or integer picks
+    # they are not channel names)
+    for ax in list(axs.flat)[: i + 1]:
+        spans = []
+        if baseline:
+            ax.axvspan(baseline[0], baseline[1], alpha=0.1, color="black")
+            spans.append(("baseline", baseline))
+        if roi:
+            ax.axvspan(roi[0], roi[1], alpha=0.1, color="black")
+            spans.append(("roi", roi))
 
-            for vspan in spans:
-                name, span = vspan
-                start, end = span
-                ax.annotate(
-                    f"{name}",
-                    xy=((start + end) / 2, 0),
-                    xycoords=("data", "axes fraction"),
-                    ha="center",
-                    va="bottom",
-                    fontsize=plt.rcParams["xtick.labelsize"],
-                )
+        for vspan in spans:
+            name, span = vspan
+            start, end = span
+            ax.annotate(
+                f"{name}",
+                xy=((start + end) / 2, 0),
+                xycoords=("data", "axes fraction"),
+                ha="center",
+                va="bottom",
+                fontsize=plt.rcParams["xtick.labelsize"],
+            )
 
     return fig
 

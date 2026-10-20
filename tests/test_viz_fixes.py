@@ -77,3 +77,17 @@ def test_psd_accepts_spectrum_baseline(epochs_abc):
     fig = plotting.plot_PSD({"a": epochs_abc["a"]}, 1, 30, baseline_dict={"a": spec})
     assert fig is not None
     plt.close("all")
+
+
+@pytest.mark.parametrize("kwargs", [{"combine": "mean"}, {}])
+def test_erp_spans_drawn_on_used_axes(epochs_abc, kwargs):
+    """Baseline and ROI spans are drawn with and without channel combination."""
+    fig = plotting.plot_ERP(
+        {"a": epochs_abc["a"]},
+        picks=["Cz", "Pz"],
+        baseline=(-0.2, 0),
+        roi=(0.3, 0.5),
+        **kwargs,
+    )
+    assert sum(len(ax.patches) for ax in fig.axes) >= 2
+    plt.close("all")
