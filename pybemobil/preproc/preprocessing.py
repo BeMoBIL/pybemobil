@@ -337,45 +337,29 @@ def get_bad_chs(
 # %% Classes
 
 
-def _interpolate_and_rereference(raw_clean):
-    """Interpolate bad EEG channels, then average-reference all EEG channels.
+def _interpolate_and_rereference(raw):
+    """Interpolate bad non-EOG channels, then average-reference all EEG.
 
-    This is the final stage of :meth:`EEGPreprocessor.run_raw` and
-    :meth:`EEGPreprocessor.reapply_ica`, done in place. As in BeMoBIL's
-    ``bemobil_interp_avref``, interpolation comes first so that the final
-    average reference includes the interpolated channels and the EEG
-    channels sum to zero at every sample.
-
-    The average-reference projection carried since the bandpass stage
-    (computed over the good channels) is applied first, so interpolation
-    works on referenced data; the data are then re-referenced to the
-    average of all EEG channels. EOG-typed channels are not on the scalp
-    and are never interpolated.
+    Final stage of ``run_raw`` and ``reapply_ica``, in place. As in BeMoBIL's
+    ``bemobil_interp_avref``, the reference includes the interpolated channels.
     """
-    if not any(p["desc"] == "Average EEG reference" for p in raw_clean.info["projs"]):
-        raw_clean.set_eeg_reference(ref_channels="average", projection=True)
-    raw_clean.apply_proj()
-
-    eog_chs = [
-        ch
-        for ch, d in zip(raw_clean.ch_names, raw_clean.info["chs"])
-        if d["kind"] == mne.io.constants.FIFF.FIFFV_EOG_CH
-    ]
-    bads_to_interp = [b for b in raw_clean.info["bads"] if b not in eog_chs]
-    raw_clean.info["bads"] = bads_to_interp
-    raw_clean.interpolate_bads(reset_bads=True, method="spline")
+    # Apply the good-channel average reference carried since the bandpass.
+    if not any(p["desc"] == "Average EEG reference" for p in raw.info["projs"]):
+        raw.set_eeg_reference(projection=True)
+    raw.apply_proj()
+    eog = [raw.ch_names[i] for i in mne.pick_types(raw.info, eog=True, exclude=[])]
+    bads = [b for b in raw.info["bads"] if b not in eog]
+    raw.info["bads"] = bads
+    raw.interpolate_bads(reset_bads=True, method="spline")
     append_desc(
-        raw_clean,
+        raw,
         name="interpolate_bads",
         method="spline",
-        interpolated=bads_to_interp,
-        eog_excluded=eog_chs,
+        interpolated=bads,
+        eog_excluded=eog,
     )
-
-    # Re-reference over all EEG channels, interpolated ones included (MNE
-    # replaces the applied good-channel projection).
-    raw_clean.set_eeg_reference(ref_channels="average", projection=False)
-    append_desc(raw_clean, name="avg_ref", channels="all EEG (after interpolation)")
+    raw.set_eeg_reference(ref_channels="average", projection=False)
+    append_desc(raw, name="avg_ref", channels="all EEG (after interpolation)")
 
 
 def _try_report(make_report_func, **kwargs):
