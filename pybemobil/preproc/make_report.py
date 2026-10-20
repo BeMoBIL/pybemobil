@@ -446,21 +446,22 @@ def _safe_label(label: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", str(label)).strip("-") or "condition"
 
 
-def _derivative_base(fname_out: Path) -> str:
-    """Return the BIDS base name used for the other derivatives of a run."""
-    from pybemobil.preproc.preprocessing import get_derivative_paths
-
-    return get_derivative_paths(fname_out)["report"].name[: -len("_report.html")]
-
-
 def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> None:
     """Save butterfly + GFP per condition as PNGs, combine, and add to *report*.
 
-    Saves individual and combined PNG files next to *fname_out* when provided;
-    otherwise uses a temporary directory.
+    Saves individual and combined PNG files in the ``figures`` folder of
+    *fname_out* (see :func:`get_derivative_paths`) when provided; otherwise
+    uses a temporary directory.
     """
     if not evokeds_dict_ave:
         return
+
+    figdir = None
+    if fname_out is not None:
+        from pybemobil.preproc.preprocessing import get_derivative_paths
+
+        figdir = get_derivative_paths(fname_out)["figures"]
+        figdir.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         savenames = []
@@ -471,10 +472,8 @@ def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> N
                 LOGGER.warning(f"Skipping joint plot for '{condition}': {exc}")
                 continue
             safe_cond = _safe_label(condition)
-            if fname_out is not None:
-                savepath = fname_out.with_name(
-                    f"{_derivative_base(fname_out)}_joint-{safe_cond}.png"
-                )
+            if figdir is not None:
+                savepath = figdir / f"joint-{safe_cond}.png"
             else:
                 savepath = Path(tmpdir) / f"joint-{safe_cond}.png"
             fig.savefig(str(savepath), dpi=150, bbox_inches="tight")
@@ -487,10 +486,8 @@ def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> N
         if len(savenames) == 1:
             combined_path = savenames[0]
         else:
-            if fname_out is not None:
-                combined_path = fname_out.with_name(
-                    f"{_derivative_base(fname_out)}_joint-COMBINED.png"
-                )
+            if figdir is not None:
+                combined_path = figdir / "joint-COMBINED.png"
             else:
                 combined_path = Path(tmpdir) / "joint-COMBINED.png"
             if not _glue_imgs(savenames, combined_path):
