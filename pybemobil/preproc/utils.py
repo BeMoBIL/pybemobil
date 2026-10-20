@@ -134,9 +134,9 @@ def init_descriptor(source=None, pipeline=""):
         ``versions``, and an empty ``steps`` list.
     """
     try:
-        bpn_ver = version("pybemobil")
+        pkg_ver = version("pybemobil")
     except PackageNotFoundError:
-        bpn_ver = "unknown"
+        pkg_ver = "unknown"
 
     try:
         mne_ver = version("mne")
@@ -154,7 +154,7 @@ def init_descriptor(source=None, pipeline=""):
         "pipeline": pipeline,
         "input": src,
         "timestamp": datetime.datetime.now().isoformat(),
-        "versions": {"pybemobil": bpn_ver, "mne": mne_ver},
+        "versions": {"pybemobil": pkg_ver, "mne": mne_ver},
         "steps": [],
     }
 
@@ -524,8 +524,8 @@ def compute_ica(
     filter_bands_ica : tuple of float
         ``(l_freq, h_freq)`` for the ICA-specific bandpass filter. The
         default ``(1.75, 100.0)`` uses BeMoBIL's 1.75 Hz AMICA high-pass and
-        the 100 Hz low-pass ICLabel expects. (:class:`EEGPreprocessor` uses
-        ``(1.75, None)`` because its data is already low-passed at 100 Hz.)
+        the 100 Hz low-pass ICLabel expects. :class:`EEGPreprocessor` uses
+        ``(1.75, None)`` because its data is already low-passed at 100 Hz.
     downsample_ica : float
         Target sampling rate for ICA fitting (anti-aliasing applied
         automatically).  Skipped when the recording is already at or below this
@@ -573,6 +573,9 @@ def compute_ica(
         merged over it key by key. Pass
         ``{"fit_params": {"do_reject": False}}`` to disable rejection.
         Ignored when a non-jamica method is used.
+    reject_by_annotation : bool
+        If ``True`` (default), 1 s epochs that overlap ``BAD_*`` annotations
+        are left out of the ICA fit and of ICLabel.
 
     Returns
     -------
@@ -978,9 +981,8 @@ def remove_line(
 ):
     """Remove spectral line noise from EEG using ZapLine (DSS-based).
 
-    Operates on EEG channels only; all other channel types are left untouched
-    (except for the ``"adaptive"`` and ``"zapline"`` methods, which operate
-    on the full raw object via :class:`mne_denoise.zapline.ZapLine`).
+    Operates on EEG channels only; all other channel types are left
+    untouched, for every method.
 
     Parameters
     ----------

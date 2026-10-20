@@ -46,7 +46,7 @@ _ELECTRICAL_CH_TYPES = frozenset(("eeg", "ecg", "emg", "eog", "seeg", "ecog", "b
 class MultimodalRecording:
     """Container returned by :meth:`XDFLoader.load`.
 
-    Attributes
+    Parameters
     ----------
     raw : mne.io.BaseRaw
         Tier-1 physiological streams (EEG, ECG, EMG, eye-tracking, EDA, ...)

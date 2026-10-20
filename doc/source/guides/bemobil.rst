@@ -165,7 +165,8 @@ Intentional differences
    - ``*_desc-preica_eeg.fif``: the data ICA was applied to (for re-applying ICA)
    - ``*_ica.fif``, ``*_iclabels.json``, ``*_badchannels.json``
    - ``*_dipoles/`` (one ``.bdip`` file per IC) and ``*_trans.fif``, when fitting dipoles
-   - ``*_report.html``
+   - ``*_report.html``, and ``*_figures/`` for figures saved with the report (e.g. the
+     joint ERP plots)
 
    By default (``save_bids_raw=True``) the untouched input is also written once to the raw
    part of the BIDS dataset with :func:`mne_bids.write_raw_bids`. The BIDS root is taken

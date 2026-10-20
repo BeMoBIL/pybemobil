@@ -671,6 +671,10 @@ class EEGPreprocessor:
         ``fit_ica=False``.
     fit_ica : bool
         If ``False``, skip ICA entirely (``raw_clean`` equals ``raw_pre_ica``).
+    reject_by_annotation : bool
+        If ``True`` (default), data under ``BAD_*`` annotations (e.g.
+        ``BAD_break`` from *annotate_breaks*) are left out of the ICA fit and
+        of ICLabel.
     thresh : float
         ICLabel decision threshold.  Set to ``-1`` (default, matching
         BeMoBIL) to use **popularity-vote** mode: each IC is assigned to

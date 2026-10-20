@@ -77,23 +77,29 @@ We recommend installing into a fresh environment, e.g. `conda create -n pybemobi
 
 ```python
 from pybemobil.io import XDFLoader
-from pybemobil.preproc import EEGPreprocessor, find_rigid_bodies
+from pybemobil.preproc import EEGPreprocessor
 
 # Load a multimodal XDF recording
 loader = XDFLoader(montage="easycap-M1")  # or a path to your .elc/.fif
 recording = loader.load("sub-01_task-walk_run-01.xdf")
-raw = recording.raw
+
+# Run the full preprocessing pipeline; outputs are named after fname_out
+preprocessor = EEGPreprocessor(loader=loader)
+raw_clean, report, metadata = preprocessor.run_raw(
+    recording.raw,
+    fname_out="derivatives/pybemobil/sub-01/eeg/sub-01_task-walk_run-01_eeg.fif",
+)
 ```
 
-See `examples/` for complete worked examples:
+See `pybemobil/examples/` for complete worked examples:
 
 | Feature | Example script |
 | --------- | --------------- |
-| XDF multimodal loading | `examples/xdf_loading.py` |
-| EEG preprocessing pipeline | `examples/preprocessing.py` |
-| Visualization (run preprocessing.py first) | `examples/plotting.py` |
-| Rigid body kinematics | `examples/motion_processing.py` |
-| BIDS export | `examples/bids_export_example.py` |
+| XDF multimodal loading | `pybemobil/examples/xdf_loading.py` |
+| EEG preprocessing pipeline | `pybemobil/examples/preprocessing.py` |
+| Visualization (run preprocessing.py first) | `pybemobil/examples/plotting.py` |
+| Rigid body kinematics | `pybemobil/examples/motion_processing.py` |
+| BIDS export | `pybemobil/examples/bids_export_example.py` |
 
 ## Citing
 
