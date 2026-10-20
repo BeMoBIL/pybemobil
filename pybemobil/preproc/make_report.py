@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import sys
 import tempfile
 import warnings
 from pathlib import Path
@@ -60,12 +61,13 @@ def _add_temp_image(report, fig, *, title, caption="", section=None):
 def _gui_available() -> bool:
     """Return True when a display is available for 3-D rendering.
 
-    On Linux/macOS headless servers ``DISPLAY`` is unset; on Windows the check
-    is skipped (a display is always assumed to be available).
+    On Linux, headless servers have neither ``DISPLAY`` nor
+    ``WAYLAND_DISPLAY`` set. Windows and macOS do not use ``DISPLAY``, so a
+    display is assumed there.
     """
-    if os.name == "nt":
+    if sys.platform in ("win32", "darwin"):
         return True
-    return bool(os.environ.get("DISPLAY", ""))
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
 def _esc(value) -> str:
