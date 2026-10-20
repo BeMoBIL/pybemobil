@@ -134,9 +134,9 @@ def init_descriptor(source=None, pipeline=""):
         ``versions``, and an empty ``steps`` list.
     """
     try:
-        bpn_ver = version("pybemobil")
+        pkg_ver = version("pybemobil")
     except PackageNotFoundError:
-        bpn_ver = "unknown"
+        pkg_ver = "unknown"
 
     try:
         mne_ver = version("mne")
@@ -154,7 +154,7 @@ def init_descriptor(source=None, pipeline=""):
         "pipeline": pipeline,
         "input": src,
         "timestamp": datetime.datetime.now().isoformat(),
-        "versions": {"pybemobil": bpn_ver, "mne": mne_ver},
+        "versions": {"pybemobil": pkg_ver, "mne": mne_ver},
         "steps": [],
     }
 
