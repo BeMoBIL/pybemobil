@@ -21,6 +21,12 @@ are expected to follow one of two naming conventions:
 
 Position channels follow the convention ``<rigid_body>_pos_x``,
 ``<rigid_body>_pos_y``, ``<rigid_body>_pos_z``.
+
+Units: Euler angles computed from quaternions are in radians. Euler input
+channels are expected in radians unless ``angle_unit="deg"`` is passed to
+:func:`process_rigid_body` (many motion capture systems stream degrees);
+they keep their unit in the output. Velocities and accelerations are in
+the input unit per second and per second squared.
 """
 
 # %% Imports
@@ -83,6 +89,7 @@ def process_rigid_body(
     compute_acceleration=True,
     sfreq_target=None,
     unwrap=True,
+    angle_unit="rad",
 ):
     """Process rigid body motion capture streams.
 
@@ -133,7 +140,13 @@ def process_rigid_body(
         (:func:`numpy.unwrap`), as in BeMoBIL.  Angles wrap at ±π, so a
         continuous rotation otherwise produces jumps of 2π that dominate
         the filtered signal and its derivatives.  The returned orientation
-        channels are then continuous and may exceed ±π.
+        channels are then continuous and may exceed ±π (±180°).
+    angle_unit : ``"rad"`` | ``"deg"``
+        Unit of Euler *input* channels (``<rb>_eul_*``), used to unwrap them
+        with the right period (2π or 360°). Default ``"rad"``. A warning is
+        logged when ``"rad"`` is given but the angles exceed ±2π, which
+        usually means degrees. Euler angles computed from quaternions are
+        always in radians.
 
     Returns
     -------
@@ -144,6 +157,9 @@ def process_rigid_body(
         Per-rigid-body processing summary:
         ``{rb_name: {"mode": "quat->euler"|"euler", "channels": list[str]}}``.
     """
+    if angle_unit not in ("rad", "deg"):
+        raise ValueError(f"angle_unit must be 'rad' or 'deg', got {angle_unit!r}.")
+    period = 2 * np.pi if angle_unit == "rad" else 360.0
     raw_out = raw.copy().load_data()
 
     if rb_names is None:
@@ -201,9 +217,19 @@ def process_rigid_body(
             orient_chs, mode = new_ch_names, "quat->euler"
         else:
             orient_chs, mode = eul_chs, "euler"
+            idx = [raw_out.ch_names.index(ch) for ch in orient_chs]
+            if angle_unit == "rad" and np.nanmax(np.abs(raw_out._data[idx])) > (
+                2 * np.pi + 1e-6
+            ):
+                LOGGER.warning(
+                    f"  {rb}: Euler angles exceed ±2π although angle_unit='rad'; "
+                    "they are probably in degrees. Pass angle_unit='deg' so they "
+                    "are unwrapped with a 360° period."
+                )
             if unwrap:
-                idx = [raw_out.ch_names.index(ch) for ch in orient_chs]
-                raw_out._data[idx] = np.unwrap(raw_out._data[idx], axis=1)
+                raw_out._data[idx] = np.unwrap(
+                    raw_out._data[idx], axis=1, period=period
+                )
 
         rb_channels[rb] = (orient_chs, pos_chs, mode)
 
