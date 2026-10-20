@@ -227,8 +227,6 @@ fig = plot_various_ERPs(
 
 # %% TFR (a.k.a. ERSP, ERDS, etc.)
 
-# Note: `plot_ERSP` is deprecated in pybemobil; use `plot_TFR` instead.
-
 # For raw EEG data
 figs = plot_TFR(
     epoch_dict,

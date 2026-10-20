@@ -12,6 +12,8 @@ authors:
     affiliation: Technische Universität Berlin
 version: 0.1.0
 date-released: 2026-10-19
+# Zenodo concept DOI: resolves to the latest archived version.
+doi: 10.5281/zenodo.23480659
 license: BSD-3-Clause
 repository-code: "https://github.com/BeMoBIL/pybemobil"
 url: "https://bemobil.github.io/pybemobil/"

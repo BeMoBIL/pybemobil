@@ -278,22 +278,21 @@ def get_bad_chs(
         - ``"bad_by_line_noise"``: channels flagged by per-channel line noise.
         - ``"bad_by_manual"``: manual bad channels.
     """
-    raw = raw.copy()
-
+    # Every criterion below looks at EEG channels only, so work on an
+    # EEG-only copy (for file-backed data only the EEG is read).
     eeg_idx = mne.pick_types(raw.info, eeg=True, exclude=[])
-    eeg_data = raw.get_data(picks=eeg_idx)
-    nonfinite = [
-        raw.ch_names[i]
-        for i, row in zip(eeg_idx, eeg_data)
-        if not np.isfinite(row).all()
-    ]
+    n_eeg = len(eeg_idx)
+    input_bads = list(raw.info["bads"])  # incl. non-EEG ones, dropped by pick
+    raw = raw.copy().pick(eeg_idx).load_data()
+
+    finite = np.isfinite(raw._data).all(axis=1)
+    nonfinite = [ch for ch, ok in zip(raw.ch_names, finite) if not ok]
     if nonfinite:
         raise ValueError(
             f"get_bad_chs: EEG channels {nonfinite} contain NaN or inf values. "
             "Fill or interpolate missing data (or drop these channels) before "
             "bad-channel detection."
         )
-    del eeg_data
 
     if isinstance(notch_lines, str):
         if notch_lines == "europe":
@@ -311,7 +310,7 @@ def get_bad_chs(
     # flat criterion then no longer recognises. They are kept out of the
     # reference and out of the other criteria.
     manual_bads = sorted(set((pyprep_kwargs or {}).get("bad_by_manual") or []))
-    manual_bads = sorted(set(manual_bads) | set(raw.info["bads"]))
+    manual_bads = sorted(set(manual_bads) | set(input_bads))
     # NoisyChannels runs PyPREP's find_bad_by_nan_flat on construction; the
     # other criteria run later, on the referenced data.
     bad_by_flat = NoisyChannels(
@@ -322,7 +321,7 @@ def get_bad_chs(
         bad_by_manual=manual_bads,
         reject_by_annotation=(pyprep_kwargs or {}).get("reject_by_annotation"),
     ).bad_by_flat
-    raw.info["bads"] = sorted(set(manual_bads) | set(bad_by_flat))
+    raw.info["bads"] = sorted((set(manual_bads) & set(raw.ch_names)) | set(bad_by_flat))
 
     # Consensus preprocessing steps before finding bads (on the copy only)
     if highpass is not None:
@@ -373,6 +372,7 @@ def get_bad_chs(
             LOGGER.warning(f"RANSAC bad-channel detection failed: {_exc}")
 
     bads_dict_pyprep = noisy_channels.get_bads(as_dict=True)
+    del noisy_channels  # holds two more copies of the EEG
     # PyPREP lists everything passed as bad_by_manual as manual; report the
     # flat channels found before referencing under their own criterion.
     bads_dict_pyprep["bad_by_manual"] = list(bad_by_manual)
@@ -382,6 +382,7 @@ def get_bad_chs(
 
     # === FASTER ====
     epochs = mne.make_fixed_length_epochs(raw, duration=1.0, preload=True)
+    del raw  # the epochs hold the data FASTER needs
     picks = mne.pick_types(
         epochs.info, eeg=True, exclude=sorted(set(bad_by_manual) | set(bad_by_flat))
     )
@@ -402,7 +403,6 @@ def get_bad_chs(
     bad_chs.update(bad_by_manual)
     bad_chs.update(bad_by_line_noise)
 
-    n_eeg = len(eeg_idx)
     fraction_bad = len(bad_chs) / n_eeg if n_eeg else 0.0
     if max_bad_fraction is not None and fraction_bad > max_bad_fraction:
         warnings.warn(

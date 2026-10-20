@@ -1,5 +1,7 @@
 # pybemobil
 
+[![PyPI](https://img.shields.io/pypi/v/pybemobil)](https://pypi.org/project/pybemobil/) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23480659.svg)](https://doi.org/10.5281/zenodo.23480659)
+
 MoBI data loading, preprocessing, and visualization built on MNE-Python.
 
 ## Structure
@@ -101,7 +103,7 @@ See `pybemobil/examples/` for complete worked examples:
 
 ## Citing
 
-If you use pybemobil in your work, please cite it. The "Cite this repository" button on GitHub (generated from [`CITATION.cff`](https://github.com/BeMoBIL/pybemobil/blob/main/CITATION.cff)) gives the reference in APA and BibTeX format.
+If you use pybemobil in your work, please cite it. The "Cite this repository" button on GitHub (generated from [`CITATION.cff`](https://github.com/BeMoBIL/pybemobil/blob/main/CITATION.cff)) gives the reference in APA and BibTeX format. Every release is archived on Zenodo; to cite pybemobil in general, use the DOI [10.5281/zenodo.23480659](https://doi.org/10.5281/zenodo.23480659), which always resolves to the latest version.
 
 pybemobil is a Python implementation of the BeMoBIL pipeline, so please consider also citing:
 
