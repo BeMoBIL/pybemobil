@@ -30,7 +30,7 @@ def _raw_with_trials(rng, duration=40.0, sfreq=100.0):
 
 def _preparer(**kwargs):
     remaps = {"c": {"A/x": "target", "B/y": "standard"}}
-    defaults = dict(epoch_tlimes=(-0.2, 0.5), baseline=(-0.2, 0), tshift=0)
+    defaults = dict(epoch_tlims=(-0.2, 0.5), baseline=(-0.2, 0), tshift=0)
     return EpochPreparer(remaps, **{**defaults, **kwargs})
 
 
@@ -82,7 +82,7 @@ def test_epoch_preparer_skips_missing_labels(rng, tmp_path, caplog):
     raw = _raw_with_trials(rng)
     prep = EpochPreparer(
         {"c": {"A/x": "target", "C/z": "never"}},
-        epoch_tlimes=(-0.2, 0.5),
+        epoch_tlims=(-0.2, 0.5),
         baseline=(-0.2, 0),
         tshift=0,
     )

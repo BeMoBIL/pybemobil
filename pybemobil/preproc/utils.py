@@ -481,11 +481,29 @@ def _resolve_jamica_kwargs(jamica_kwargs):
     return kwargs
 
 
+#: ICLabel class names, in ICLabel's order.
+ICLABEL_CLASSES = tuple(ICALABEL_METHODS_NUMERICAL_TO_STRING["iclabel"].values())
+
+#: Default classes to keep: all except "eye blink", as in BeMoBIL
+#: (``iclabel_classes = [1 2 4 5 6 7]``).
+_DEFAULT_INCLUDE_LABELS = frozenset(set(ICLABEL_CLASSES) - {"eye blink"})
+
+
+def _check_iclabel_names(labels, name):
+    """Raise for ICLabel class names that do not exist (typo protection)."""
+    unknown = sorted(set(labels) - set(ICLABEL_CLASSES))
+    if unknown:
+        raise ValueError(
+            f"Unknown ICLabel class(es) in {name}: {unknown}. Valid classes are "
+            f"{list(ICLABEL_CLASSES)}."
+        )
+
+
 def compute_ica(
     raw,
-    filter_bands_ica=(1.0, 100.0),
+    filter_bands_ica=(1.75, 100.0),
     downsample_ica=250,
-    thresh=0.7,
+    thresh=-1,
     rng_seed=None,
     exclude_labels=None,
     include_labels=None,
@@ -500,28 +518,35 @@ def compute_ica(
     raw : mne.io.Raw
         Continuous EEG recording (must contain EEG channels).
     filter_bands_ica : tuple of float
-        ``(l_freq, h_freq)`` for the ICA-specific bandpass filter.
+        ``(l_freq, h_freq)`` for the ICA-specific bandpass filter. The
+        default ``(1.75, 100.0)`` uses BeMoBIL's 1.75 Hz AMICA high-pass and
+        the 100 Hz low-pass ICLabel expects. (:class:`EEGPreprocessor` uses
+        ``(1.75, None)`` because its data is already low-passed at 100 Hz.)
     downsample_ica : float
         Target sampling rate for ICA fitting (anti-aliasing applied
         automatically).  Skipped when the recording is already at or below this
         rate.
     thresh : float
-        ICLabel probability threshold.  A component is excluded only when its
-        predicted probability for the artifact label meets or exceeds this
-        value.  Set to ``-1`` to use **popularity-vote** mode: each IC is
-        assigned to whichever class has the highest predicted probability,
-        regardless of the absolute value, mirroring BeMoBIL's
-        ``iclabel_threshold=-1`` behaviour.
+        ICLabel decision rule. ``-1`` (default) is **popularity-vote** mode,
+        as in BeMoBIL (``iclabel_threshold=-1``): each IC is assigned to the
+        class with the highest probability and excluded if that class is not
+        kept. A value in ``[0, 1]`` is **probability-threshold** mode: an IC
+        is excluded only when its winning class is one to remove *and* that
+        class's probability is at least ``thresh``; uncertain ICs are kept.
     rng_seed : int | None
         Random seed passed to :class:`mne.preprocessing.ICA` for
         reproducibility.
     exclude_labels : list of str | None
-        ICLabel category names to *exclude* (e.g. ``["eye", "muscle"]``).
-        Mutually exclusive with *include_labels*.
+        ICLabel classes to *exclude* (e.g. ``["eye blink",
+        "muscle artifact"]``). Mutually exclusive with *include_labels*.
     include_labels : list of str | None
-        ICLabel category names to *keep*; all other categories are excluded
-        (e.g. ``["brain", "other"]``).
-        Mutually exclusive with *exclude_labels*.
+        ICLabel classes to *keep*; all other classes are excluded (e.g.
+        ``["brain", "other"]``). If neither this nor *exclude_labels* is
+        given, all classes except ``"eye blink"`` are kept, as in
+        :class:`EEGPreprocessor` and BeMoBIL. Valid names are
+        ``"brain"``, ``"muscle artifact"``, ``"eye blink"``,
+        ``"heart beat"``, ``"line noise"``, ``"channel noise"`` and
+        ``"other"``. Mutually exclusive with *exclude_labels*.
     ica_method : str
         ICA algorithm to use.  ``"jamica"`` (default) uses
         `jamica <https://github.com/snesmaeili/jamica>`_, a JAX-accelerated
@@ -565,6 +590,12 @@ def compute_ica(
     """
     if exclude_labels is not None and include_labels is not None:
         raise ValueError("Specify either exclude_labels or include_labels, not both.")
+    if exclude_labels is not None:
+        _check_iclabel_names(exclude_labels, "exclude_labels")
+    else:
+        if include_labels is None:
+            include_labels = _DEFAULT_INCLUDE_LABELS
+        _check_iclabel_names(include_labels, "include_labels")
 
     raw_ica = raw.copy().pick("eeg")
 
@@ -675,39 +706,16 @@ def compute_ica(
     labels = ic_labels["labels"]
     probas = ic_labels["y_pred_proba"]  # winning-class probability per IC
 
-    popularity_vote = float(thresh) < 0
-
-    if popularity_vote:
-        # Each IC is assigned to the class with the highest probability
-        # (`labels` already holds that winning label). Exclude ICs whose
-        # class is in exclude_labels or, otherwise, not in the keep set.
-        if exclude_labels is not None:
-            exclude_idx = [
-                idx for idx, label in enumerate(labels) if label in exclude_labels
-            ]
-        else:
-            _keep = (
-                set(include_labels)
-                if include_labels is not None
-                else {"brain", "other"}
-            )
-            exclude_idx = [
-                idx for idx, label in enumerate(labels) if label not in _keep
-            ]
-    elif exclude_labels is not None:
-        exclude_idx = [
-            idx
-            for idx, (label, row) in enumerate(zip(labels, probas))
-            if label in exclude_labels and float(np.max(row)) >= thresh
-        ]
-    elif include_labels is not None:
-        exclude_idx = [
-            idx
-            for idx, (label, row) in enumerate(zip(labels, probas))
-            if label not in include_labels or float(np.max(row)) < thresh
-        ]
+    # `labels` holds each IC's winning class and `probas` its probability.
+    # An IC is a removal candidate when its class is excluded (or not kept).
+    if exclude_labels is not None:
+        remove = [label in exclude_labels for label in labels]
     else:
-        exclude_idx = []
+        remove = [label not in include_labels for label in labels]
+    if float(thresh) >= 0:
+        # Probability-threshold mode: only remove confident candidates.
+        remove = [r and float(p) >= thresh for r, p in zip(remove, probas)]
+    exclude_idx = [idx for idx, r in enumerate(remove) if r]
 
     ica.exclude = exclude_idx
 
