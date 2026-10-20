@@ -669,7 +669,7 @@ def _add_tier2_stream_plots(
         plt.close(fig)
 
 
-def _plot_dipoles_figure(dipole_idx, dipoles, ica, residuals, trans):
+def _plot_dipoles_figure(dipole_idx, dipoles, ica, residuals, trans, subjects_dir):
     """Return a matplotlib figure showing one dipole with IC/residual insets."""
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
@@ -677,6 +677,7 @@ def _plot_dipoles_figure(dipole_idx, dipoles, ica, residuals, trans):
         fig = mne.viz.plot_dipole_locations(
             dipoles[dipole_idx],
             subject="fsaverage",
+            subjects_dir=subjects_dir,
             trans=trans,
             mode="orthoview",
             show=False,
@@ -723,8 +724,7 @@ def _add_dipole_figures(report, dipoles, ica, residuals, trans, subjects_dir):
             )
             continue
 
-        os.environ.setdefault("SUBJECTS_DIR", str(subjects_dir))
-        fig = _plot_dipoles_figure(i, dipoles, ica, residuals, trans)
+        fig = _plot_dipoles_figure(i, dipoles, ica, residuals, trans, subjects_dir)
         buf = _io.BytesIO()
         fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
         plt.close(fig)

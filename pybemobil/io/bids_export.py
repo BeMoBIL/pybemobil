@@ -177,15 +177,18 @@ def make_bids_dataset_description(
         Funding source strings.
     doi : str | None
         Dataset DOI.
+
+    Fields that are not given are left out of the file instead of being
+    written as empty strings (``"License": ""`` is not valid BIDS metadata).
     """
     mne_bids.make_dataset_description(
         path=str(bids_root),
         name=name,
-        authors=authors or [],
-        data_license=data_license or "",
-        acknowledgements=acknowledgements or "",
-        funding=funding or [],
-        doi=doi or "",
+        authors=authors or None,
+        data_license=data_license or None,
+        acknowledgements=acknowledgements or None,
+        funding=funding or None,
+        doi=doi or None,
         overwrite=True,
     )
     LOGGER.info(f"BIDS dataset_description.json written at {bids_root}")
@@ -198,6 +201,7 @@ def batch_export_to_bids(
     line_freq=50.0,
     overwrite=False,
     verbose=False,
+    on_error="warn",
 ):
     """Export multiple subjects / runs to BIDS in a single call.
 
@@ -217,12 +221,18 @@ def batch_export_to_bids(
         Overwrite existing BIDS files.
     verbose : bool | str | int
         Verbosity for :func:`mne_bids.write_raw_bids`.
+    on_error : ``"warn"`` | ``"raise"``
+        What to do when a run fails. ``"warn"`` (default) emits a warning
+        naming the run and continues with the others, so one bad run does
+        not abort a batch. ``"raise"`` stops with the error.
 
     Returns
     -------
     bids_paths : list of mne_bids.BIDSPath
         One path per successfully written run.
     """
+    if on_error not in ("raise", "warn"):
+        raise ValueError(f"on_error must be 'raise' or 'warn', got {on_error!r}.")
     results = []
     for entry in subject_runs:
         raw = entry["raw"]
@@ -250,6 +260,15 @@ def batch_export_to_bids(
             )
             results.append(bp)
         except Exception as exc:
-            LOGGER.error(f"BIDS export failed for sub-{subject}: {exc}")
+            if on_error == "raise":
+                raise
+            import warnings
+
+            warnings.warn(
+                f"BIDS export failed for sub-{subject} (session={session}, "
+                f"run={run}): {type(exc).__name__}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     return results
