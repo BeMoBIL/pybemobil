@@ -179,20 +179,6 @@ def _amica_n_rejected(ica):
     return None if n is None else int(n)
 
 
-def _find_flat_channels(raw, exclude=(), flat_threshold=1e-15):
-    """Return EEG channels whose std or MAD is below *flat_threshold* (volts).
-
-    Same criterion as PyPREP's ``find_bad_by_nan_flat``.
-    """
-    picks = mne.pick_types(raw.info, eeg=True, exclude=list(exclude))
-    if len(picks) == 0:
-        return []
-    data = raw.get_data(picks=picks)
-    mad = np.median(np.abs(data - np.median(data, axis=1, keepdims=True)), axis=1)
-    flat = (data.std(axis=1) < flat_threshold) | (mad < flat_threshold)
-    return [raw.ch_names[i] for i, f in zip(picks, flat) if f]
-
-
 def _notch_freqs_below_nyquist(freqs, sfreq, notch_width):
     """Return the line frequencies a notch filter can handle at *sfreq*.
 
@@ -321,7 +307,16 @@ def get_bad_chs(
     # reference and out of the other criteria.
     manual_bads = sorted(set((pyprep_kwargs or {}).get("bad_by_manual") or []))
     manual_bads = sorted(set(manual_bads) | set(raw.info["bads"]))
-    bad_by_flat = _find_flat_channels(raw, exclude=manual_bads)
+    # NoisyChannels runs PyPREP's find_bad_by_nan_flat on construction; the
+    # other criteria run later, on the referenced data.
+    bad_by_flat = NoisyChannels(
+        raw,
+        do_detrend=False,
+        ransac=False,
+        correlation=False,
+        bad_by_manual=manual_bads,
+        reject_by_annotation=(pyprep_kwargs or {}).get("reject_by_annotation"),
+    ).bad_by_flat
     raw.info["bads"] = sorted(set(manual_bads) | set(bad_by_flat))
 
     # Consensus preprocessing steps before finding bads (on the copy only)
