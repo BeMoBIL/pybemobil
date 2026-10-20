@@ -40,7 +40,7 @@ Overview
      - ZapLine-Plus via ``mne-denoise`` (``line_noise_method="adaptive"``)
    * - Bad channel detection
      - ``clean_rawdata`` (ASR-based correlation)
-     - PyPREP + FASTER + optional line-noise / flatline criteria
+     - PyPREP + FASTER + optional line-noise criterion
    * - Outlier rejection for ICA
      - AMICA sample rejection (``AMICA_autoreject=1``)
      - AMICA sample rejection via ``jamica`` (on by default); ASR optional
@@ -116,10 +116,13 @@ Intentional differences
 
    PyBeMoBIL uses PyPREP (NaN/flat, deviation, high-frequency noise, correlation and, when
    a montage is set, RANSAC) combined with FASTER's channel correlation and variance
-   criteria, plus optional line-noise and flatline criteria (see
-   :func:`~pybemobil.preproc.get_bad_chs`). It runs once and has no iteration or rejection
-   target. Both approaches flag channels that stop correlating with their neighbours, but
-   the exact channels detected can differ.
+   criteria, plus an optional line-noise criterion (see
+   :func:`~pybemobil.preproc.get_bad_chs`), on a 1 Hz high-passed, average-referenced copy
+   of the data (flat channels are found before referencing). It runs once and has no
+   iteration. Instead of raising the threshold like ``num_chan_rej_max_target``, it warns
+   when more than a fifth of the channels is flagged (``max_bad_fraction=0.2``). Both
+   approaches flag channels that stop correlating with their neighbours, but the exact
+   channels detected can differ.
 
 **ASR**
    The original MATLAB implementation does not apply ASR; it relies on AMICA's built-in
