@@ -393,6 +393,12 @@ def build_sys_info(source_data=None):
 def auto_coreg_fsaverage(info, subjects_dir, fit_icp_kwargs=None):
     """Automatically coregister head to fsaverage MRI and return the transform.
 
+    The fit is rigid (rotation and translation, no scaling): the returned
+    transform is used with fsaverage's *unscaled* head model in
+    :func:`fit_dipoles_on_ica`, and a scale estimated by the coregistration
+    is not part of the transform, so it would leave the head and the model
+    misaligned.
+
     Parameters
     ----------
     info : mne.Info
@@ -411,7 +417,7 @@ def auto_coreg_fsaverage(info, subjects_dir, fit_icp_kwargs=None):
     fiducials = "estimated"
     subject = "fsaverage"
     coreg = mne.coreg.Coregistration(info, subject, subjects_dir, fiducials=fiducials)
-    coreg.set_scale_mode("uniform")
+    coreg.set_scale_mode(None)
     coreg.fit_fiducials(verbose=True)
 
     if fit_icp_kwargs is None:
