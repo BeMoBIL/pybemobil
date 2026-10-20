@@ -20,14 +20,17 @@ import mne
 import numpy as np
 
 from pybemobil.preproc.utils import format_duration
+from pybemobil.viz.plotting import glue_imgs
 
 # %% Settings & Constants
 
 LOGGER = logging.getLogger(__name__)
 
-_REPORT_N_JOBS = int(os.environ.get("BPN_REPORT_N_JOBS", "1"))
-DIPOLE_PLOT_N_JOBS = _REPORT_N_JOBS
-ICA_REPORT_N_JOBS = _REPORT_N_JOBS
+# Parallel jobs for the ICA section of the report (BPN_REPORT_N_JOBS is the
+# old name of the variable).
+ICA_REPORT_N_JOBS = int(
+    os.environ.get("PYBEMOBIL_REPORT_N_JOBS", os.environ.get("BPN_REPORT_N_JOBS", "1"))
+)
 
 try:
     import seaborn as _sns
@@ -414,29 +417,6 @@ def _add_trans(report, trans, raw_clean, subjects_dir) -> None:
             raise
 
 
-def _glue_imgs(paths: list, out_path: str | Path) -> bool:
-    """Vertically concatenate images at *paths* and save to *out_path*.
-
-    Returns ``True`` on success, ``False`` when Pillow is not available.
-    """
-    try:
-        from PIL import Image
-    except ImportError:
-        warnings.warn("Pillow not available; skipping joint-plot combination.")
-        return False
-
-    imgs = [Image.open(str(p)) for p in paths]
-    w = max(img.width for img in imgs)
-    h = sum(img.height for img in imgs)
-    combined = Image.new("RGB", (w, h), (255, 255, 255))
-    y = 0
-    for img in imgs:
-        combined.paste(img, (0, y))
-        y += img.height
-    combined.save(str(out_path))
-    return True
-
-
 def _safe_label(label: str) -> str:
     """Return *label* reduced to characters that are valid in file names.
 
@@ -490,8 +470,7 @@ def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> N
                 combined_path = figdir / "joint-COMBINED.png"
             else:
                 combined_path = Path(tmpdir) / "joint-COMBINED.png"
-            if not _glue_imgs(savenames, combined_path):
-                combined_path = savenames[0]
+            glue_imgs(savenames, combined_path, delete_fnames=False)
 
         report.add_image(str(combined_path), title="Butterfly, GFP, and Topoplots")
 

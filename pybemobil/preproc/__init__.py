@@ -15,8 +15,6 @@ from pybemobil.preproc.preprocessing import (
 )
 from pybemobil.preproc.utils import (
     StepTimer,
-    _annotate_break_iter,
-    _handle_trans,
     append_desc,
     auto_coreg_fsaverage,
     build_sys_info,
@@ -67,8 +65,6 @@ __all__ = [
     # Utilities
     "format_duration",
     "build_sys_info",
-    "_annotate_break_iter",
-    "_handle_trans",
     # Epoching
     "get_stimulus_rename_map",
 ]

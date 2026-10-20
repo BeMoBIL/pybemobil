@@ -27,8 +27,8 @@ LOGGER = logging.getLogger(__name__)
 def glue_imgs(fnames, fname, delete_fnames=True):
     """Glue images together.
 
-    Use Pillow to read standard image files from disk and concatenate them vertically.
-    Save the resulting image back to disk.
+    Use Pillow to read standard image files from disk and concatenate them vertically
+    (narrower images are padded with white). Save the resulting image back to disk.
 
     Parameters
     ----------
@@ -50,7 +50,7 @@ def glue_imgs(fnames, fname, delete_fnames=True):
         hx_total += hx
         images.append(img)
 
-    new_img = Image.new("RGB", (wx_max, hx_total))
+    new_img = Image.new("RGB", (wx_max, hx_total), (255, 255, 255))
     y_offset = 0
     for img in images:
         new_img.paste(img, (0, y_offset))
