@@ -726,6 +726,29 @@ def compute_ica(
     return ica, ic_labels
 
 
+def _warn_if_no_fiducials(info):
+    """Warn when electrode positions have no fiducials (unknown head frame).
+
+    Without nasion and preauricular points MNE assumes the positions are
+    already in head coordinates, so the fsaverage head model may not fit
+    the electrodes and dipole locations are shifted.
+    """
+    import warnings as _warnings
+
+    dig = info.get("dig") or []
+    has_fids = any(d["kind"] == mne.io.constants.FIFF.FIFFV_POINT_CARDINAL for d in dig)
+    if not has_fids:
+        _warnings.warn(
+            "The electrode positions have no fiducials, so MNE assumes they are "
+            "already in fsaverage head coordinates. Dipole locations can be "
+            "shifted if they are not (e.g. the bundled standard_MoBI_128 "
+            "montage). Use a montage with fiducials (e.g. digitised positions) "
+            "or check the alignment with mne.viz.plot_alignment.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+
+
 def fit_dipoles_on_ica(
     ica,
     info,
@@ -787,6 +810,7 @@ def fit_dipoles_on_ica(
         )
     if n_dipoles != 1:
         raise ValueError(f"n_dipoles must be 1 or 2, got {n_dipoles}")
+    _warn_if_no_fiducials(info)
 
     fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
     bem = str(fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif")
