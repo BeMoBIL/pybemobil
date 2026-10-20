@@ -505,3 +505,29 @@ def test_load_real_xdf_with_dropout(tmp_path, dejitter):
     good = raw.copy().crop(6.0, None)
     psd = good.compute_psd(fmax=100, picks="ch0", verbose=False)
     assert psd.freqs[np.argmax(psd.get_data()[0])] == pytest.approx(50, abs=1)
+
+
+# %% Units of auxiliary streams
+
+
+def test_build_raw_scales_aux_voltage_units(eeg_stream):
+    """An ECG in microvolts from a separate amplifier is converted to volts."""
+    ts = T0 + np.arange(0, 10, 1 / 250)
+    ecg = _stream(
+        "ecg", "ECG", ts, np.full((len(ts), 1), 1000.0), 250, ["ECG"], ["uV"], "ecg"
+    )
+    loader = XDFLoader(special_streams={"ecg": {"name": "ecg"}})
+    raw, _, _, _ = loader._build_raw([eeg_stream, ecg])
+    np.testing.assert_allclose(raw.get_data(picks="ECG")[0, :-10], 1e-3)
+
+
+def test_build_raw_keeps_non_voltage_aux_units(eeg_stream, caplog):
+    """Gaze in pixels is not rescaled and does not warn about volts."""
+    ts = T0 + np.arange(0, 10, 1 / 120)
+    gaze = _stream("gaze", "Gaze", ts, np.full((len(ts), 1), 640.0), 120, ["gx"])
+    gaze["info"]["desc"][0]["channels"][0]["channel"][0]["unit"] = ["pixels"]
+    loader = XDFLoader(special_streams={"gaze": {"name": "gaze"}})
+    with caplog.at_level(logging.WARNING):
+        raw, _, _, _ = loader._build_raw([eeg_stream, gaze])
+    np.testing.assert_allclose(raw.get_data(picks="gx")[0, :-10], 640.0)
+    assert "Unrecognised unit" not in caplog.text

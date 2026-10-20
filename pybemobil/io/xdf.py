@@ -35,6 +35,8 @@ _MICROVOLT_UNITS = frozenset(("microvolt", "microvolts", "µv", "μv", "uv"))
 _MILLIVOLT_UNITS = frozenset(("millivolt", "millivolts", "mv"))
 _NANOVOLT_UNITS = frozenset(("nanovolt", "nanovolts", "nv"))
 _VOLT_UNITS = frozenset(("v", "volt", "volts"))
+# Channel types whose data MNE expects in volts.
+_ELECTRICAL_CH_TYPES = frozenset(("eeg", "ecg", "emg", "eog", "seeg", "ecog", "bio"))
 
 # %% Data container
 
@@ -87,10 +89,12 @@ class MultimodalRecording:
 # %% XDF-specific helpers (MNE-dependent; stay in this module)
 
 
-def _unit_scale(unit: str, ch_name: str = "") -> float:
+def _unit_scale(unit: str, ch_name: str = "", warn: bool = True) -> float:
     """Return scale factor to convert *unit* to SI volts (case-insensitive).
 
-    Emits a warning for unrecognised units so silent identity scaling is visible.
+    Emits a warning for unrecognised units so silent identity scaling is
+    visible, unless ``warn=False`` (used for non-electrical channels such as
+    gaze or motion, whose units are not voltages).
     """
     normed = unit.strip().lower()
     if normed in _MICROVOLT_UNITS:
@@ -99,7 +103,7 @@ def _unit_scale(unit: str, ch_name: str = "") -> float:
         return 1e-3
     if normed in _NANOVOLT_UNITS:
         return 1e-9
-    if normed not in _VOLT_UNITS and normed not in ("na", ""):
+    if warn and normed not in _VOLT_UNITS and normed not in ("na", ""):
         logger.warning(
             "Unrecognised unit '%s' for channel '%s' -- assuming volts "
             "(no scaling applied).",
@@ -730,11 +734,19 @@ class XDFLoader:
                 aligned[nan_mask] = 0.0
                 self._annotate_nan_regions(raw, nan_mask, label)
 
-            ch_labels, ch_types, _ = _extract_channel_info(s)
+            ch_labels, ch_types, ch_units = _extract_channel_info(s)
+            # Voltage units (uV, mV, nV) are converted to volts as for the
+            # EEG; other units (pixels, mm, ...) are kept as they are.
+            aux_scale = np.array(
+                [
+                    _unit_scale(u, ch, warn=ty in _ELECTRICAL_CH_TYPES)
+                    for u, ch, ty in zip(ch_units, ch_labels, ch_types)
+                ]
+            )
             aux_info = mne.create_info(
                 ch_names=ch_labels, sfreq=eeg_native_sfreq, ch_types=ch_types
             )
-            aux_raw = mne.io.RawArray(aligned.T, aux_info, verbose=False)
+            aux_raw = mne.io.RawArray((aligned * aux_scale).T, aux_info, verbose=False)
             try:
                 raw.add_channels([aux_raw], force_update_info=True)
             except ValueError:
