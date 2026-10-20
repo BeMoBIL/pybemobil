@@ -344,7 +344,9 @@ pyxdf's clock offset correction handles step offsets between devices but not
 slow linear drift (a device clock running slightly fast or slow over an hour).
 The loader warns when the EEG stream's measured rate deviates from its nominal
 rate by more than 0.1 % and keeps markers on the right EEG samples, but drift
-between *auxiliary* devices is not corrected. If you suspect drift, verify alignment by extracting a signal visible in two
+between *auxiliary* devices is not corrected.
+
+If you suspect drift, verify alignment by extracting a signal visible in two
 streams (e.g. heartbeat R-peaks visible in both EEG and ECG) and checking
 whether peak pairs stay aligned over the full recording. A systematic time
 shift growing over the session indicates uncorrected drift and should be
