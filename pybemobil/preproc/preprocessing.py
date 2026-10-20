@@ -1040,9 +1040,9 @@ class EEGPreprocessor:
             append_desc(
                 raw_pre_ica,
                 name="ica",
-                method=self.ica_method,
+                **getattr(ica, "pybemobil_fit_info_", {"method": ica.method}),
                 n_excluded=len(ica.exclude),
-                excluded=ica.exclude,
+                excluded=[int(i) for i in ica.exclude],
                 thresh=self.thresh,
                 amica_rejected_samples=_amica_n_rejected(ica),
             )
