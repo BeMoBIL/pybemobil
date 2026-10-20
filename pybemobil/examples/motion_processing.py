@@ -75,9 +75,9 @@ print("Detected rigid bodies:", rb_names)  # ['head', 'rhand']
 
 raw_motion, rb_info = process_rigid_body(
     raw,
-    lowpass_orient=8.0,  # low-pass orientation signals at 8 Hz
-    lowpass_pos=8.0,  # low-pass position at 8 Hz
-    lowpass_deriv=24.0,  # low-pass velocity/acceleration at 24 Hz
+    lowpass_orient=6.0,  # low-pass orientation at 6 Hz (BeMoBIL lowpass_motion)
+    lowpass_pos=6.0,  # low-pass position at 6 Hz
+    lowpass_deriv=18.0,  # velocity/acceleration (lowpass_motion_after_derivative)
     compute_velocity=True,
     compute_acceleration=True,
 )
