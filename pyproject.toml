@@ -22,19 +22,20 @@ dependencies = [
   "matplotlib",
   "meegkit",
   "mne-bids>=0.18",
-  "mne-denoise",
+  "mne-denoise>=0.0.2",  # ZapLine's n_select and adaptive mode
   "mne-faster",
   "mne-icalabel>=0.8",
   "mne>=1.13",
-  "nibabel",
+  "nibabel",  # not imported directly: MNE reads fsaverage MRIs with it (plots)
   "numpy",
   "onnxruntime",
-  "pandas",
-  "pybv",
+  "Pillow",
+  "pybv",  # not imported directly: MNE exports BrainVision (BIDS) with it
   "pyprep>=0.8",
   "python-picard",
   "pyxdf",
-  "scikit-learn",
+  "scikit-learn",  # not imported directly: MNE's ICA (fastica) and covariances
+  "scipy",
 ]
 description = "MoBI data loading, preprocessing, and visualization built on MNE-Python"
 dynamic = ["version"]
@@ -67,8 +68,11 @@ docs = [
 # (the default).  Optional: compute_ica falls back to picard with a warning
 # when this is not installed.
 jamica = ["jamica[jax]>=0.3"]
+# Nicer ICLabel probability plots in the HTML report (falls back to
+# matplotlib without it)
+report = ["seaborn"]
 # Dependencies for running the test infrastructure
-test = ["pybemobil[jamica]", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
+test = ["pybemobil[jamica,report]", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
 
 [project.urls]
 "Bug Tracker" = "https://github.com/BeMoBIL/pybemobil/issues/"
@@ -77,9 +81,12 @@ test = ["pybemobil[jamica]", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdi
 
 [tool.hatch.build]
 exclude = [
-  "**/tests",
   "/.*",
 ]
+
+[tool.hatch.build.targets.sdist]
+# The sdist carries the tests so that downstream packagers can run them.
+include = ["/pybemobil", "/tests", "/doc", "/CITATION.cff", "/README.md", "/LICENSE"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["pybemobil"]
