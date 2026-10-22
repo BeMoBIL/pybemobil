@@ -331,12 +331,20 @@ def _find_gaps(ts, sfreq):
     The lower envelope is the minimum of the offset over all *later* samples.
     Latency spikes and stalls (offset rises, then recovers) cannot raise it;
     only samples that are truly missing can.
+
+    Near the end of the stream that minimum is taken over only a few samples,
+    so timestamp jitter alone lifts it (the last sample's own jitter can
+    round to a phantom 1-sample gap). The envelope is therefore held
+    constant over the last 0.5 s (at least 5 samples); a dropout inside
+    that final stretch is not detected.
     """
     n = len(ts)
     if n < 3 or sfreq <= 0:
         return []
     offset = (ts - ts[0]) * sfreq - np.arange(n)
     env = np.minimum.accumulate(offset[::-1])[::-1]  # non-decreasing
+    tail = min(n, max(int(round(0.5 * sfreq)), 5))
+    env[n - tail :] = env[n - tail]
     cum = np.round(env - env[0]).astype(int)
     steps = np.diff(cum)
     return [(int(i), int(steps[i])) for i in np.flatnonzero(steps > 0)]
