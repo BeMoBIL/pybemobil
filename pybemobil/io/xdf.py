@@ -90,14 +90,25 @@ class MultimodalRecording:
 # %% XDF-specific helpers (MNE-dependent; stay in this module)
 
 
-def _unit_scale(unit: str, ch_name: str = "", warn: bool = True) -> float:
+def _xml_str(node: dict, key: str, default: str = "") -> str:
+    """Return the text of XML field *key* in a pyxdf *node*, or *default*.
+
+    pyxdf parses an empty tag (``<unit/>``) as ``[None]`` rather than leaving
+    the key out, so ``node.get(key, [default])[0]`` can still return ``None``.
+    """
+    value = node.get(key, [default])
+    value = value[0] if value else None
+    return default if value is None else str(value)
+
+
+def _unit_scale(unit: str | None, ch_name: str = "", warn: bool = True) -> float:
     """Return scale factor to convert *unit* to SI volts (case-insensitive).
 
     Emits a warning for unrecognised units so silent identity scaling is
     visible, unless ``warn=False`` (used for non-electrical channels such as
     gaze or motion, whose units are not voltages).
     """
-    normed = unit.strip().lower()
+    normed = (unit or "").strip().lower()
     if normed in _MICROVOLT_UNITS:
         return 1e-6
     if normed in _MILLIVOLT_UNITS:
@@ -127,7 +138,7 @@ def _match_stream(
         info = s["info"]
         if name and info.get("name", [""])[0] != name:
             continue
-        if stream_type and info.get("type", [""])[0].lower() != stream_type.lower():
+        if stream_type and _xml_str(info, "type").lower() != stream_type.lower():
             continue
         if source_id and info.get("source_id", [""])[0] != source_id:
             continue
@@ -151,13 +162,13 @@ def _extract_channel_info(stream: dict) -> tuple[list[str], list[str], list[str]
     n_chans = int(stream["info"]["channel_count"][0])
     labels, types, units = [], [], []
     try:
-        for ch in stream["info"]["desc"][0]["channels"][0]["channel"]:
-            labels.append(str(ch["label"][0]))
-            ch_type = ch.get("type", ["misc"])[0].lower()
+        for i, ch in enumerate(stream["info"]["desc"][0]["channels"][0]["channel"]):
+            labels.append(_xml_str(ch, "label") or f"ch_{i}")
+            ch_type = (_xml_str(ch, "type") or "misc").lower()
             types.append(
                 ch_type if ch_type in mne.io.get_channel_type_constants() else "misc"
             )
-            units.append(ch.get("unit", ["NA"])[0])
+            units.append(_xml_str(ch, "unit") or "NA")
     except (TypeError, IndexError, KeyError):
         pass
 
@@ -314,39 +325,21 @@ def _stream_sfreq(stream: dict) -> float:
     return effective
 
 
-def _find_gaps(ts: np.ndarray, sfreq: float) -> list[tuple[int, int]]:
-    """Find dropouts in a regularly sampled stream.
+def _find_gaps(ts, sfreq):
+    """Find dropouts: shifts of the timestamp offset that never come back.
 
-    Returns ``(i, n_missing)`` pairs: ``n_missing`` samples are missing
-    between sample ``i`` and ``i + 1``.
-
-    A gap is a *persistent* shift of the timestamps against the sample
-    index. The offset ``(ts - ts[0]) * sfreq - index`` is compared over
-    half-second windows before and after each suspicious step, using its
-    lower envelope (the window minimum): transmission delays only ever make
-    timestamps late, so the minimum tracks the device clock while jitter
-    and chunked timestamps (several samples sharing one timestamp) only
-    move the values above it.
+    The lower envelope is the minimum of the offset over all *later* samples.
+    Latency spikes and stalls (offset rises, then recovers) cannot raise it;
+    only samples that are truly missing can.
     """
     n = len(ts)
     if n < 3 or sfreq <= 0:
         return []
     offset = (ts - ts[0]) * sfreq - np.arange(n)
-    steps = np.diff(offset)  # 0 for a perfect grid
-    candidates = np.flatnonzero(steps >= 0.75)
-    win = max(int(round(0.5 * sfreq)), 5)
-    gaps: list[tuple[int, int]] = []
-    last = 0
-    for i in candidates:
-        if i < last:
-            continue
-        before = offset[max(last, i + 1 - win) : i + 1]
-        after = offset[i + 1 : i + 1 + win]
-        n_missing = int(round(float(after.min() - before.min())))
-        if n_missing >= 1:
-            gaps.append((int(i), n_missing))
-            last = int(i) + 1
-    return gaps
+    env = np.minimum.accumulate(offset[::-1])[::-1]  # non-decreasing
+    cum = np.round(env - env[0]).astype(int)
+    steps = np.diff(cum)
+    return [(int(i), int(steps[i])) for i in np.flatnonzero(steps > 0)]
 
 
 def _fill_gaps(
@@ -820,7 +813,7 @@ class XDFLoader:
             if any(s is u for u in used):
                 continue
             stream_name = s["info"].get("name", [""])[0]
-            stream_type_val = s["info"].get("type", [""])[0]
+            stream_type_val = _xml_str(s["info"], "type")
             if stream_type_val.lower() in marker_types:
                 continue
             if _is_irregular(s) and len(s["time_stamps"]) > 0:
