@@ -477,7 +477,9 @@ class XDFLoader:
         Behaviour when auxiliary streams do not fully cover the EEG time range.
         Only ``'pad'`` is supported: the full EEG time range is kept, and
         auxiliary streams that do not cover it receive ``np.nan`` there
-        (zeroed in Raw, marked with ``BAD_<label>_missing`` annotations).
+        (zeroed in Raw, marked with ``<label>_missing`` annotations; not
+        ``BAD_``, since a gap in an auxiliary stream says nothing about the
+        EEG and must not exclude it from ``reject_by_annotation``).
         Cropping to the overlap of all streams is not offered: with many
         streams and the dropouts typical of MoBI recordings it would discard
         large amounts of usable EEG.
@@ -533,7 +535,7 @@ class XDFLoader:
                 "dropouts typical of MoBI recordings, cropping to the overlap of "
                 "all streams would discard large amounts of usable EEG. Use "
                 "on_mismatch='pad' (the default); uncovered auxiliary samples are "
-                "marked with BAD_<label>_missing annotations."
+                "marked with <label>_missing annotations."
             )
         if self.on_mismatch != "pad":
             raise ValueError(f"on_mismatch must be 'pad', got {self.on_mismatch!r}.")
@@ -848,7 +850,7 @@ class XDFLoader:
         nan_mask: np.ndarray,
         label: str,
     ) -> None:
-        """Add BAD annotations covering samples where an auxiliary stream was NaN.
+        """Add ``<label>_missing`` annotations where an auxiliary stream was NaN.
 
         Onsets and durations are given in samples of the Raw grid (sample
         ``i`` is at ``i / sfreq``), so they match the data even when the
@@ -861,7 +863,7 @@ class XDFLoader:
         ends = np.where(diff == -1)[0]  # exclusive
         for s_idx, e_idx in zip(starts, ends):
             raw.annotations.append(
-                s_idx / sfreq, (e_idx - s_idx) / sfreq, f"BAD_{label}_missing"
+                s_idx / sfreq, (e_idx - s_idx) / sfreq, f"{label}_missing"
             )
 
     def _set_montage(self, raw: mne.io.BaseRaw) -> None:
