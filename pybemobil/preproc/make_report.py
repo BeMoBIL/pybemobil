@@ -306,16 +306,84 @@ _ICA_REPORT_MAX_EPOCHS = 300
 
 
 def _epochs_for_ica_report(epochs, max_epochs=_ICA_REPORT_MAX_EPOCHS):
-    """Return EEG-only, loaded epochs for :meth:`mne.Report.add_ica`.
+    """Return EEG-only, loaded epochs for :meth:`mne.Report.add_ica`, or None.
 
     ``add_ica`` needs several times the memory of the epochs it gets, so it
     gets the EEG channels (all the ICA uses) of at most *max_epochs* evenly
-    spaced epochs; only those are loaded.
+    spaced epochs that do not overlap a BAD annotation and contain no NaN.
+    Returns None if no such epoch exists.
+
+    Lazy epochs are read from their raw in a few large blocks: reading them
+    one by one from a ``.fif.gz`` (e.g. on a network share) re-opens and
+    decompresses the file for every epoch and can take hours.
     """
-    n = len(epochs.events)  # len(epochs) needs loaded epochs
+    if epochs.preload:
+        epochs = epochs.copy()
+    elif getattr(epochs, "reject_by_annotation", False):
+        # BAD annotations are applied only when lazy epochs are read; find the
+        # epochs to keep from the annotations alone, before subsampling
+        good = [
+            i
+            for i, annots in enumerate(epochs.get_annotations_per_epoch())
+            if not any(d.lower().startswith("bad") for _, _, d in annots)
+        ]
+        if not good:
+            return None
+        epochs = epochs[good]
+    n = len(epochs.events)
     if n > max_epochs:
         epochs = epochs[np.linspace(0, n - 1, max_epochs).astype(int)]
-    return epochs.load_data().pick("eeg")
+    if not n:
+        return None
+    if epochs.preload or getattr(epochs, "_raw", None) is None:
+        epochs.load_data()
+        if not len(epochs):  # pick() raises on empty epochs
+            return None
+        epochs.pick("eeg")
+    else:
+        epochs = _read_epochs_blockwise(epochs)
+    # MNE's ICA plots refuse NaN; drop epochs with non-finite EEG samples
+    bad = ~np.isfinite(epochs.get_data()).all(axis=(1, 2))
+    if bad.all():
+        return None
+    if bad.any():
+        epochs.drop(np.flatnonzero(bad), reason="non-finite", verbose=False)
+    return epochs
+
+
+def _read_epochs_blockwise(epochs, block_s=300.0):
+    """Load the EEG of lazy *epochs* from their raw in blocks of *block_s* s."""
+    raw = epochs._raw
+    picks = mne.pick_types(raw.info, eeg=True, exclude=[])
+    sfreq = raw.info["sfreq"]
+    n_times = len(epochs.times)
+    starts = (
+        epochs.events[:, 0] - raw.first_samp + int(round(epochs.tmin * sfreq))
+    )
+    data = np.empty((len(starts), len(picks), n_times))
+    block = max(int(block_s * sfreq), n_times)
+    i = 0
+    while i < len(starts):
+        b0 = starts[i]
+        j = int(np.searchsorted(starts, b0 + block - n_times, side="right"))
+        j = max(j, i + 1)
+        b1 = starts[j - 1] + n_times
+        seg = raw.get_data(picks, start=b0, stop=b1)
+        for k in range(i, j):
+            data[k] = seg[:, starts[k] - b0 : starts[k] - b0 + n_times]
+        i = j
+    info = mne.pick_info(epochs.info, mne.pick_types(epochs.info, eeg=True, exclude=[]))
+    codes = set(epochs.events[:, 2].tolist())
+    event_id = {k: v for k, v in epochs.event_id.items() if v in codes}
+    return mne.EpochsArray(
+        data,
+        info,
+        events=epochs.events,
+        tmin=epochs.tmin,
+        event_id=event_id,
+        baseline=epochs.baseline,
+        verbose=False,
+    )
 
 
 def _add_ica_segments(
@@ -1070,10 +1138,18 @@ def _build_report(
             except Exception as exc:
                 warnings.warn(f"Skipping pre-ICA bad segments plot: {exc}")
 
+        ica_inst = _epochs_for_ica_report(inst_epochs)
+        if ica_inst is None:
+            # e.g. every sampled epoch overlaps a BAD annotation: averaging
+            # zero epochs gives an all-NaN evoked that MNE cannot plot
+            warnings.warn(
+                "No usable epochs for the ICA report; ICA section without "
+                "the data-based plots (overlay, properties)."
+            )
         report.add_ica(
             ica,
             title="ICA",
-            inst=_epochs_for_ica_report(inst_epochs),
+            inst=ica_inst,
             n_jobs=ICA_REPORT_N_JOBS,
         )
 
