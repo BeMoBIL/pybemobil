@@ -325,6 +325,30 @@ def _stream_sfreq(stream: dict) -> float:
     return effective
 
 
+def _resample_keep_nan(raw: mne.io.BaseRaw, sfreq: float) -> None:
+    """``raw.resample(sfreq)`` that keeps NaN gaps of auxiliary channels.
+
+    MNE's FFT resampling turns a channel with any NaN into all-NaN. Channels
+    with NaN are therefore bridged linearly for the resampling, and the
+    samples of the new grid that fall into a gap are set back to NaN.
+    """
+    nan = np.isnan(raw._data)
+    rows = np.flatnonzero(nan.any(axis=1))
+    if not len(rows):
+        raw.resample(sfreq)
+        return
+    t_old = raw.times.copy()
+    masks = nan[rows].astype(float)
+    for r in rows:
+        ok = ~nan[r]
+        raw._data[r] = (
+            np.interp(t_old, t_old[ok], raw._data[r, ok]) if ok.any() else 0.0
+        )
+    raw.resample(sfreq)
+    for k, r in enumerate(rows):
+        raw._data[r, np.interp(raw.times, t_old, masks[k]) > 0] = np.nan
+
+
 def _find_gaps(ts, sfreq):
     """Find dropouts: shifts of the timestamp offset that never come back.
 
@@ -477,9 +501,9 @@ class XDFLoader:
         Behaviour when auxiliary streams do not fully cover the EEG time range.
         Only ``'pad'`` is supported: the full EEG time range is kept, and
         auxiliary streams that do not cover it receive ``np.nan`` there
-        (zeroed in Raw, marked with ``<label>_missing`` annotations; not
-        ``BAD_``, since a gap in an auxiliary stream says nothing about the
-        EEG and must not exclude it from ``reject_by_annotation``).
+        (kept as NaN in Raw and marked with ``<label>_missing`` annotations;
+        not ``BAD_``, since a gap in an auxiliary stream says nothing about
+        the EEG and must not exclude it from ``reject_by_annotation``).
         Cropping to the overlap of all streams is not offered: with many
         streams and the dropouts typical of MoBI recordings it would discard
         large amounts of usable EEG.
@@ -590,7 +614,7 @@ class XDFLoader:
             self._set_montage(raw)
 
         if self.target_sfreq:
-            raw.resample(self.target_sfreq)
+            _resample_keep_nan(raw, self.target_sfreq)
 
         self._apply_channel_selection(raw)
 
@@ -725,10 +749,10 @@ class XDFLoader:
                 max_nan_gap_s=self.max_nan_gap_s,
             )
 
-            # MNE RawArray does not accept NaN -- zero-fill and annotate gaps
+            # Gaps stay NaN (zeros would look like real data) and are
+            # annotated; EEG processing never touches these channels.
             nan_mask = np.isnan(aligned).any(axis=1)
             if nan_mask.any():
-                aligned[nan_mask] = 0.0
                 self._annotate_nan_regions(raw, nan_mask, label)
 
             ch_labels, ch_types, ch_units = _extract_channel_info(s)
