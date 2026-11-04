@@ -1087,7 +1087,10 @@ def remove_line(
             adaptive=is_adaptive,
             **zap_kwargs,
         )
-        return zap.fit_transform(raw.copy())
+        # no copy: ZapLine only reads the input (get_data) and returns its
+        # result in a copy, so a copy here would only add a full recording
+        # to the peak memory
+        return zap.fit_transform(raw)
 
     # ------------------------------------------------------------------
     # meegkit methods: "dss_line" and "dss_line_iter"
