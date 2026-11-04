@@ -33,11 +33,14 @@ Key references
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 import numpy as np
 import scipy.interpolate
 import scipy.signal
+
+logger = logging.getLogger(__name__)
 
 #: Methods accepted by :func:`align_stream_to_timestamps`.
 ALIGNMENT_METHODS = ("linear", "pchip", "sinc", "nearest", "stim")
@@ -363,6 +366,21 @@ def align_stream_to_timestamps(
     data = np.asarray(data, dtype=float)
     if data.ndim == 1:
         data = data[:, np.newaxis]
+
+    # Timestamps must increase strictly (interpolators and searchsorted rely
+    # on it). Out-of-order or repeated stamps occur in damaged or spliced XDF
+    # files: sort them and keep the first sample of each repeated stamp.
+    src_ts = np.asarray(src_ts, dtype=float)
+    if len(src_ts) > 1 and not np.all(np.diff(src_ts) > 0):
+        order = np.argsort(src_ts, kind="stable")
+        src_ts, data = src_ts[order], data[order]
+        keep = np.concatenate([[True], np.diff(src_ts) > 0])
+        logger.warning(
+            "Source timestamps not strictly increasing: sorted, %d repeated "
+            "sample(s) dropped.",
+            int((~keep).sum()),
+        )
+        src_ts, data = src_ts[keep], data[keep]
 
     # nearest and stim bypass interpolation entirely - no NaN handling needed
     if method == "nearest":
