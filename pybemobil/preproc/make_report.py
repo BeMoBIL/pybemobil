@@ -357,9 +357,7 @@ def _read_epochs_blockwise(epochs, block_s=300.0):
     picks = mne.pick_types(raw.info, eeg=True, exclude=[])
     sfreq = raw.info["sfreq"]
     n_times = len(epochs.times)
-    starts = (
-        epochs.events[:, 0] - raw.first_samp + int(round(epochs.tmin * sfreq))
-    )
+    starts = epochs.events[:, 0] - raw.first_samp + int(round(epochs.tmin * sfreq))
     data = np.empty((len(starts), len(picks), n_times))
     block = max(int(block_s * sfreq), n_times)
     i = 0
