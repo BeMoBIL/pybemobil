@@ -20,6 +20,17 @@ def test_long_gap_kept_in_any_channel():
     assert not np.isnan(out[:, 0]).any()  # channel 0 is untouched
 
 
+def test_unsorted_and_repeated_timestamps():
+    """Out-of-order and repeated source stamps are sorted / dropped."""
+    ts = np.arange(0, 10, 0.01)
+    data = np.sin(ts)
+    bad_ts = np.concatenate([ts[:500], ts[495:]])  # 5 stamps repeated
+    bad = np.concatenate([data[:500], data[495:]])
+    order = np.random.default_rng(0).permutation(len(bad_ts))
+    out = align_stream_to_timestamps(bad[order], bad_ts[order], ts, method="pchip")
+    np.testing.assert_allclose(out[:, 0], data, atol=1e-9)
+
+
 def test_short_gap_is_filled():
     """Gaps shorter than max_nan_gap_s are bridged."""
     ts = np.arange(0, 10, 0.01)

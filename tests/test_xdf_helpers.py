@@ -313,6 +313,29 @@ def test_build_raw_missing_annotation_covers_last_sample(eeg_stream):
     assert onset + duration == pytest.approx(raw.times[-1] + 1 / 500)
     # an aux-stream gap must not exclude the EEG: not a BAD_ annotation
     assert list(raw.annotations.description) == ["gaze_missing"]
+    # the gap stays NaN (zeros would look like data); covered samples do not
+    gx = raw.get_data(picks="gx")[0]
+    assert np.isnan(gx[raw.times >= 8.0]).all()
+    assert np.isfinite(gx[raw.times < 7.99]).all()
+
+
+def test_resample_keeps_aux_nan_gaps():
+    """Resampling bridges NaN gaps for the filter and puts them back after."""
+    import mne
+
+    from pybemobil.io.xdf import _resample_keep_nan
+
+    sfreq, n = 500.0, 5000
+    info = mne.create_info(["Cz", "gx"], sfreq, ["eeg", "misc"])
+    data = np.vstack([np.sin(np.arange(n) / 50), np.cos(np.arange(n) / 50)])
+    data[1, 2000:2500] = np.nan  # 4.0-5.0 s
+    raw = mne.io.RawArray(data, info, verbose=False)
+    _resample_keep_nan(raw, 250.0)
+    gx = raw.get_data(picks="gx")[0]
+    gap = (raw.times >= 4.0) & (raw.times < 5.0)
+    assert np.isnan(gx[gap]).all()
+    assert np.isfinite(gx[~gap & ((raw.times < 3.99) | (raw.times > 5.01))]).all()
+    assert np.isfinite(raw.get_data(picks="Cz")).all()
 
 
 @pytest.mark.parametrize("kind", ["fif", "elc", "name", "object"])
