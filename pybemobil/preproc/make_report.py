@@ -495,15 +495,16 @@ def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> N
 def _find_missing_spans(annotations) -> list[tuple[float, float, str]]:
     """Return ``(onset, duration, description)`` for every gap-fill annotation.
 
-    These are the ``BAD_<label>_missing`` annotations added by
+    These are the ``<label>_missing`` annotations added by
     :meth:`~pybemobil.io.XDFLoader._annotate_nan_regions` wherever an
-    auxiliary Tier-1 stream had to be NaN-filled to cover a gap.
+    auxiliary Tier-1 stream had to be NaN-filled to cover a gap (older
+    versions named them ``BAD_<label>_missing``; both are recognised).
     """
     spans = []
     for onset, duration, desc in zip(
         annotations.onset, annotations.duration, annotations.description
     ):
-        if desc.startswith("BAD_") and desc.endswith("_missing"):
+        if desc.endswith("_missing"):
             spans.append((float(onset), float(duration), str(desc)))
     return spans
 

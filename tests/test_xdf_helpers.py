@@ -311,6 +311,8 @@ def test_build_raw_missing_annotation_covers_last_sample(eeg_stream):
     raw, _, _, _ = loader._build_raw([eeg_stream, gaze])
     (onset,), (duration,) = raw.annotations.onset, raw.annotations.duration
     assert onset + duration == pytest.approx(raw.times[-1] + 1 / 500)
+    # an aux-stream gap must not exclude the EEG: not a BAD_ annotation
+    assert list(raw.annotations.description) == ["gaze_missing"]
 
 
 @pytest.mark.parametrize("kind", ["fif", "elc", "name", "object"])
