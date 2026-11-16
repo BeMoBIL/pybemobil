@@ -428,6 +428,26 @@ def get_bad_chs(
 # %% Classes
 
 
+def _apply_proj_keep_nan(raw):
+    """``raw.apply_proj()`` that keeps NaN gaps out of the other channels.
+
+    Applying a projector multiplies it into all channels at once. The EEG
+    rows have zero weight on non-EEG channels, but ``0 * NaN`` is NaN, so a
+    NaN gap in any auxiliary channel (e.g. missing gaze, see
+    ``io.xdf``) would turn every EEG channel NaN over that gap. The NaN
+    samples are set to zero for the projection and restored afterwards.
+    """
+    nan = np.isnan(raw._data)
+    if not nan.any():
+        raw.apply_proj()
+        return
+    raw._data[nan] = 0.0
+    try:
+        raw.apply_proj()
+    finally:
+        raw._data[nan] = np.nan
+
+
 def _interpolate_and_rereference(raw):
     """Interpolate bad non-EOG channels, then average-reference all EEG.
 
@@ -437,7 +457,7 @@ def _interpolate_and_rereference(raw):
     # Apply the good-channel average reference carried since the bandpass.
     if not any(p["desc"] == "Average EEG reference" for p in raw.info["projs"]):
         raw.set_eeg_reference(projection=True)
-    raw.apply_proj()
+    _apply_proj_keep_nan(raw)
     eog = [raw.ch_names[i] for i in mne.pick_types(raw.info, eog=True, exclude=[])]
     bads = [b for b in raw.info["bads"] if b not in eog]
     raw.info["bads"] = bads
