@@ -27,6 +27,11 @@ from pybemobil.viz.plotting import glue_imgs
 
 LOGGER = logging.getLogger(__name__)
 
+# EOG overlay: epochs whose EEG peak-to-peak amplitude exceeds this (V) are
+# dropped, and the overlay is skipped when fewer than the minimum remain.
+EOG_OVERLAY_REJECT_EEG = 500e-6
+EOG_OVERLAY_MIN_EVENTS = 10
+
 # Parallel jobs for the ICA section of the report.
 ICA_REPORT_N_JOBS = int(os.environ.get("PYBEMOBIL_REPORT_N_JOBS", "1"))
 
@@ -1158,16 +1163,33 @@ def _build_report(
         if eog_chs and eog_in_data:
             try:
                 inst_eye = mne.preprocessing.create_eog_epochs(
-                    raw_pre_ica, ch_name=eog_chs
+                    raw_pre_ica,
+                    ch_name=eog_chs,
+                    # Remove per-channel offsets; without this, slow drifts
+                    # dominate the overlay plot.
+                    baseline=(-0.5, -0.2),
+                    # Drop "blinks" that are really large non-ocular
+                    # transients (electrode pops, stream glitches).
+                    reject=dict(eeg=EOG_OVERLAY_REJECT_EEG),
+                    reject_by_annotation=True,
                 )
-                report._add_ica_overlay(
-                    ica=ica,
-                    inst=inst_eye,
-                    image_format=report.image_format,
-                    section="ICA EOG removal",
-                    tags=("raw",),
-                    replace=False,
-                )
+                if len(inst_eye) < EOG_OVERLAY_MIN_EVENTS:
+                    report.add_html(
+                        f"<p>Only {len(inst_eye)} clean EOG events detected "
+                        f"(minimum {EOG_OVERLAY_MIN_EVENTS}); overlay skipped. "
+                        "The blink-detection threshold is likely dominated "
+                        "by artifacts.</p>",
+                        title="ICA EOG removal",
+                    )
+                else:
+                    report._add_ica_overlay(
+                        ica=ica,
+                        inst=inst_eye,
+                        image_format=report.image_format,
+                        section="ICA EOG removal",
+                        tags=("raw",),
+                        replace=False,
+                    )
             except RuntimeError as err:
                 if "Cannot connect to a valid display" in str(err):
                     warnings.warn("Skipping ICA EOG overlay: no display available.")
