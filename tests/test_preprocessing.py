@@ -652,7 +652,7 @@ def test_apply_proj_keep_nan_does_not_spread_aux_gaps():
 
     sfreq, n = 100.0, 2000
     rng = np.random.default_rng(0)
-    montage = mne.channels.make_standard_montage("standard_1020")
+    montage = mne.channels.make_standard_montage("colin27_1020")
     eeg_names = montage.ch_names[:8]
     data = np.r_[rng.normal(0, 1e-5, (8, n)), rng.normal(0, 1, (1, n))]
     data[8, 500:700] = np.nan

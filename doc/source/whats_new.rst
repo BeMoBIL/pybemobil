@@ -6,6 +6,57 @@ Unreleased
 
 Nothing yet.
 
+0.3.0
+-----
+
+Fixes for XDF recordings with auxiliary streams and for the report. Results
+can differ from 0.2.0 for XDF recordings with LSL latency stalls or gaps in
+auxiliary streams (gaze, ECG, motion, ...): less EEG is marked as missing or
+excluded, and the cleaned EEG no longer turns NaN where an auxiliary stream
+has a gap.
+
+Behaviour changes
+~~~~~~~~~~~~~~~~~
+
+- **Gaps in auxiliary streams.** :class:`~pybemobil.io.XDFLoader` keeps
+  samples that an auxiliary stream does not cover as NaN (they were
+  zero-filled) and annotates them ``<label>_missing`` instead of
+  ``BAD_<label>_missing``. A gap in an auxiliary stream says nothing about
+  the EEG, so it no longer excludes the EEG from steps that use
+  ``reject_by_annotation``. Resampling keeps the NaN gaps.
+- **EEG dropout detection.** LSL latency spikes and stalls, where the
+  timestamps fall behind and then catch up, are no longer counted as EEG
+  dropouts, so no samples are inserted for them and no ``BAD_eeg_missing``
+  annotation is added. Timestamp jitter at the end of a stream no longer
+  produces a one-sample dropout. A dropout in the last 0.5 s of the EEG
+  stream is not detected.
+
+Bug fixes
+~~~~~~~~~
+
+- The final average reference no longer spreads NaN from auxiliary
+  channels into the EEG; before, every EEG channel was NaN wherever an
+  auxiliary stream had a gap.
+- :class:`~pybemobil.io.XDFLoader` reads streams with empty XML tags
+  (``<unit/>``, ``<type/>``, ``<label/>``), and streams are aligned when
+  their timestamps are unsorted or repeated (e.g. after a clock jump),
+  instead of raising.
+- Report: the ICA EOG overlay is baseline-corrected and leaves out epochs
+  with EEG peak-to-peak amplitude above 500 µV and epochs in BAD segments;
+  with fewer than 10 clean EOG events the overlay is skipped with a note,
+  instead of showing a misleading plot. The ICA section works with BAD or
+  NaN data (it raised "Some of the values to be plotted are NaN"), and
+  spans of missing auxiliary data are shown for both the old and the new
+  annotation names.
+
+Other changes
+~~~~~~~~~~~~~
+
+- Lower memory use and faster reports: line-noise removal with ZapLine no
+  longer copies the whole recording first, and the epochs for the ICA
+  section of the report are read in blocks (reading them one by one from a
+  ``.fif.gz`` took minutes to hours).
+
 0.2.0
 -----
 
